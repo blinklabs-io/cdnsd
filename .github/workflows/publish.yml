@@ -116,7 +116,7 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
           repository: blinklabs/chnsd
           readme-filepath: ./README.md
-          short-description: "Snek is a tool for tailing the Cardano blockchain and emitting events"
+          short-description: "DNS resolver for Handshake SLDs on Cardano"
 
   finalize-release:
     runs-on: ubuntu-latest
