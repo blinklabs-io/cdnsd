@@ -1,4 +1,4 @@
-FROM cgr.dev/chainguard/golang:1.19 AS build
+FROM cgr.dev/chainguard/go:1.19 AS build
 
 WORKDIR /code
 COPY . .
