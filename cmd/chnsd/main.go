@@ -15,6 +15,7 @@ import (
 
 	"github.com/blinklabs-io/chnsd/internal/config"
 	"github.com/blinklabs-io/chnsd/internal/dns"
+	"github.com/blinklabs-io/chnsd/internal/indexer"
 	"github.com/blinklabs-io/chnsd/internal/logging"
 )
 
@@ -63,6 +64,11 @@ func main() {
 				logger.Fatalf("failed to start debug listener: %s", err)
 			}
 		}()
+	}
+
+	// Start indexer
+	if err := indexer.GetIndexer().Start(); err != nil {
+		logger.Fatalf("failed to start indexer: %s", err)
 	}
 
 	// Start DNS listener

@@ -4,17 +4,34 @@ import (
 	"fmt"
 	"os"
 
-	ouroboros "github.com/blinklabs-io/gouroboros"
 	"github.com/kelseyhightower/envconfig"
 	"gopkg.in/yaml.v2"
 )
+
+// Per-network script address for Handshake
+var networkScriptAddresses = map[string]string{
+	"preprod": "addr_test1wqhlsl9dsny9d2hdc9uyx4ktj0ty0s8kxev4y9futq4qt4s5anczn",
+}
+
+// Per-network intercept points for starting the chain-sync
+// We start the sync somewhere near where we expect the first data to appear to save time
+// during the initial sync
+var networkInterceptPoints = map[string]struct {
+	Hash string
+	Slot uint64
+}{
+	"preprod": {
+		Hash: "f5366caf6cc87383a33fece0968c3c8c3b25ec496829ab3ba324f7dce5a89c5d",
+		Slot: 29852950,
+	},
+}
 
 type Config struct {
 	Logging LoggingConfig `yaml:"logging"`
 	Metrics MetricsConfig `yaml:"metrics"`
 	Dns     DnsConfig     `yaml:"dns"`
 	Debug   DebugConfig   `yaml:"debug"`
-	Node    NodeConfig    `yaml:"node"`
+	Indexer IndexerConfig `yaml:"indexer"`
 }
 
 type LoggingConfig struct {
@@ -37,12 +54,14 @@ type MetricsConfig struct {
 	ListenPort    uint   `yaml:"port" envconfig:"METRICS_LISTEN_PORT"`
 }
 
-type NodeConfig struct {
-	Network      string `yaml:"network" envconfig:"CARDANO_NETWORK"`
-	NetworkMagic uint32 `yaml:"networkMagic" envconfig:"CARDANO_NODE_NETWORK_MAGIC"`
-	Address      string `yaml:"address" envconfig:"CARDANO_NODE_SOCKET_TCP_HOST"`
-	Port         uint   `yaml:"port" envconfig:"CARDANO_NODE_SOCKET_TCP_PORT"`
-	SocketPath   string `yaml:"socketPath" envconfig:"CARDANO_NODE_SOCKET_PATH"`
+type IndexerConfig struct {
+	Network       string `yaml:"network" envconfig:"INDEXER_NETWORK"`
+	NetworkMagic  uint32 `yaml:"networkMagic" envconfig:"INDEXER_NETWORK_MAGIC"`
+	Address       string `yaml:"address" envconfig:"INDEXER_TCP_ADDRESS"`
+	SocketPath    string `yaml:"socketPath" envconfig:"INDEXER_SOCKET_PATH"`
+	ScriptAddress string `yaml:"scriptAddress" envconfig:"INDEXER_SCRIPT_ADDRESS"`
+	InterceptHash string `yaml:"interceptHash" envconfig:"INDEXER_INTERCEPT_HASH"`
+	InterceptSlot uint64 `yaml:"interceptSlot" envconfig:"INDEXER_INTERCEPT_SLOT"`
 }
 
 // Singleton config instance with default values
@@ -63,9 +82,8 @@ var globalConfig = &Config{
 		ListenAddress: "",
 		ListenPort:    8081,
 	},
-	Node: NodeConfig{
-		Network:    "mainnet",
-		SocketPath: "/node-ipc/node.socket",
+	Indexer: IndexerConfig{
+		Network: "preprod",
 	},
 }
 
@@ -88,18 +106,21 @@ func Load(configFile string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error processing environment: %s", err)
 	}
-	// Populate network magic value from network name
-	if globalConfig.Node.Network != "" {
-		network := ouroboros.NetworkByName(globalConfig.Node.Network)
-		if network == ouroboros.NetworkInvalid {
-			return nil, fmt.Errorf("unknown network: %s", globalConfig.Node.Network)
-		}
-		globalConfig.Node.NetworkMagic = network.NetworkMagic
+	// Provide default script address for named network
+	if scriptAddress, ok := networkScriptAddresses[globalConfig.Indexer.Network]; ok {
+		globalConfig.Indexer.ScriptAddress = scriptAddress
+	} else {
+		return nil, fmt.Errorf("no built-in script address for specified network, please provide one")
+	}
+	// Provide default intercept point for named network
+	if interceptPoint, ok := networkInterceptPoints[globalConfig.Indexer.Network]; ok {
+		globalConfig.Indexer.InterceptHash = interceptPoint.Hash
+		globalConfig.Indexer.InterceptSlot = interceptPoint.Slot
 	}
 	return globalConfig, nil
 }
 
-// Config returns the global config instance
+// GetConfig returns the global config instance
 func GetConfig() *Config {
 	return globalConfig
 }
