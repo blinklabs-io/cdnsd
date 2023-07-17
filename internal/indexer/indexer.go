@@ -14,14 +14,28 @@ import (
 	input_chainsync "github.com/blinklabs-io/snek/input/chainsync"
 	output_embedded "github.com/blinklabs-io/snek/output/embedded"
 	"github.com/blinklabs-io/snek/pipeline"
+	"github.com/miekg/dns"
 )
+
+type Domain struct {
+	name    string
+	records map[string]map[string][]DomainRecord
+}
+
+type DomainRecord struct {
+	Name  string
+	Value string
+}
 
 type Indexer struct {
 	pipeline *pipeline.Pipeline
+	domains  map[string]Domain
 }
 
 // Singleton indexer instance
-var globalIndexer = &Indexer{}
+var globalIndexer = &Indexer{
+	domains: make(map[string]Domain),
+}
 
 func (i *Indexer) Start() error {
 	cfg := config.GetConfig()
@@ -105,18 +119,61 @@ func (i *Indexer) handleEvent(evt event.Event) error {
 				return err
 			}
 			datumFields := datum.Value().(cbor.Constructor).Fields()
-			domainName := string(datumFields[0].(cbor.ByteString).Bytes())
-			nsRecords := []string{}
+			domainName := string(datumFields[0].(cbor.ByteString).Bytes()) + `.`
 			for _, record := range datumFields[1].([]any) {
-				nsRecords = append(
-					nsRecords,
-					string(record.(cbor.ByteString).Bytes()),
-				)
+				nameServer := string(record.(cbor.ByteString).Bytes()) + `.`
+				// Create NS record for domain
+				i.addRecord(domainName, domainName, "NS", nameServer)
+				// Create A record for name server
+				// We use a dummy IP address for now, since the on-chain data doesn't contain the IP yet
+				i.addRecord(domainName, nameServer, "A", "1.2.3.4")
 			}
-			logger.Infof("found domain %s with NS records: %v", domainName, nsRecords)
+			logger.Infof("found updated registration for domain: %s", domainName)
 		}
 	}
 	return nil
+}
+
+func (i *Indexer) LookupRecords(name string, recordType string) []DomainRecord {
+	for domainName, domain := range i.domains {
+		if dns.IsSubDomain(domainName, name) {
+			if records, ok := domain.records[name]; ok {
+				if record, ok := records[recordType]; ok {
+					return record
+				} else {
+					return nil
+				}
+			} else {
+				return nil
+			}
+		}
+	}
+	return nil
+}
+
+func (i *Indexer) addRecord(domainName string, recordName string, recordType string, value string) {
+	// Create initial domain record
+	if _, ok := i.domains[domainName]; !ok {
+		i.domains[domainName] = Domain{
+			name:    domainName,
+			records: make(map[string]map[string][]DomainRecord),
+		}
+	}
+	// Create initial list for record type
+	if _, ok := i.domains[domainName].records[recordName]; !ok {
+		i.domains[domainName].records[recordName] = make(map[string][]DomainRecord)
+		if _, ok := i.domains[domainName].records[recordName][recordType]; !ok {
+			i.domains[domainName].records[recordName][recordType] = make([]DomainRecord, 0)
+		}
+	}
+	// Create record
+	i.domains[domainName].records[recordName][recordType] = append(
+		i.domains[domainName].records[recordName][recordType],
+		DomainRecord{
+			Name:  recordName,
+			Value: value,
+		},
+	)
 }
 
 // GetIndexer returns the global indexer instance
