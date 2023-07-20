@@ -3,6 +3,7 @@ package dns
 import (
 	"fmt"
 	"net"
+	"strings"
 
 	"github.com/blinklabs-io/chnsd/internal/config"
 	"github.com/blinklabs-io/chnsd/internal/indexer"
@@ -35,40 +36,51 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 	logger := logging.GetLogger()
 	m := new(dns.Msg)
 
-	switch r.Question[0].Qtype {
-	default:
-		// Return a SERVFAIL response for unsupported record types
-		m.SetRcode(r, dns.RcodeServerFailure)
-	case dns.TypeA, dns.TypeNS:
-		records := indexer.GetIndexer().LookupRecords(r.Question[0].Name, dns.Type(r.Question[0].Qtype).String())
-		if len(records) == 0 {
-			// Send NXDOMAIN
-			m.SetRcode(r, dns.RcodeNameError)
-		} else {
-			// Send response
-			m.SetReply(r)
-			for _, record := range records {
-				switch r.Question[0].Qtype {
-				case dns.TypeA:
-					ipAddr := net.ParseIP(record.Value)
-					a := &dns.A{
-						Hdr: dns.RR_Header{Name: record.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 999},
-						A:   ipAddr,
-					}
-					m.Answer = append(m.Answer, a)
-				case dns.TypeNS:
-					ns := &dns.NS{
-						Hdr: dns.RR_Header{Name: record.Name, Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 999},
-						Ns:  record.Value,
-					}
-					m.Answer = append(m.Answer, ns)
-				default:
-
+	// Split query name into labels and lookup each domain and parent until we get a hit
+	queryLabels := dns.SplitDomainName(r.Question[0].Name)
+	for startLabelIdx := 0; startLabelIdx < len(queryLabels); startLabelIdx++ {
+		lookupDomainName := strings.Join(queryLabels[startLabelIdx:], ".") + `.`
+		domain := indexer.GetIndexer().LookupDomain(lookupDomainName)
+		if domain == nil {
+			continue
+		}
+		// Assemble response
+		m.SetReply(r)
+		for nameserver, ipAddress := range domain.Nameservers {
+			// NS record
+			ns := &dns.NS{
+				Hdr: dns.RR_Header{Name: domain.Name, Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 999},
+				Ns:  nameserver,
+			}
+			m.Ns = append(m.Ns, ns)
+			// A or AAAA record
+			ipAddr := net.ParseIP(ipAddress)
+			if ipAddr.To4() != nil {
+				// IPv4
+				a := &dns.A{
+					Hdr: dns.RR_Header{Name: nameserver, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 999},
+					A:   ipAddr,
 				}
+				m.Extra = append(m.Extra, a)
+			} else {
+				// IPv6
+				aaaa := &dns.AAAA{
+					Hdr:  dns.RR_Header{Name: nameserver, Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: 999},
+					AAAA: ipAddr,
+				}
+				m.Extra = append(m.Extra, aaaa)
 			}
 		}
+		// Send response
+		if err := w.WriteMsg(m); err != nil {
+			logger.Errorf("failed to write response: %s", err)
+		}
+		// We found our answer, to return from handler
+		return
 	}
 
+	// Return NXDOMAIN if we have no information about the requested domain or any of its parents
+	m.SetRcode(r, dns.RcodeNameError)
 	if err := w.WriteMsg(m); err != nil {
 		logger.Errorf("failed to write response: %s", err)
 	}
