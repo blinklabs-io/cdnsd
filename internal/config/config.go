@@ -10,7 +10,7 @@ import (
 
 // Per-network script address for Handshake
 var networkScriptAddresses = map[string]string{
-	"preprod": "addr_test1wqhlsl9dsny9d2hdc9uyx4ktj0ty0s8kxev4y9futq4qt4s5anczn",
+	"preprod": "addr_test1wpf6lxntd3dztphew0m5dagrs7ptjcg9g6vgjyazt7mw44gdnwq0h",
 }
 
 // Per-network intercept points for starting the chain-sync
@@ -21,8 +21,8 @@ var networkInterceptPoints = map[string]struct {
 	Slot uint64
 }{
 	"preprod": {
-		Hash: "f5366caf6cc87383a33fece0968c3c8c3b25ec496829ab3ba324f7dce5a89c5d",
-		Slot: 29852950,
+		Hash: "a35a0d216e00c64c257e41089138f4d22be721281d73f2ab8ef61ca8863d04a0",
+		Slot: 34255089,
 	},
 }
 

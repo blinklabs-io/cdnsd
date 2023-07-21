@@ -121,12 +121,13 @@ func (i *Indexer) handleEvent(evt event.Event) error {
 			datumFields := datum.Value().(cbor.Constructor).Fields()
 			domainName := string(datumFields[0].(cbor.ByteString).Bytes()) + `.`
 			for _, record := range datumFields[1].([]any) {
-				nameServer := string(record.(cbor.ByteString).Bytes()) + `.`
+				recordConstructor := record.(cbor.Constructor)
+				nameServer := string(recordConstructor.Fields()[0].(cbor.ByteString).Bytes()) + `.`
+				ipAddress := string(recordConstructor.Fields()[1].(cbor.ByteString).Bytes())
 				// Create NS record for domain
 				i.addRecord(domainName, domainName, "NS", nameServer)
 				// Create A record for name server
-				// We use a dummy IP address for now, since the on-chain data doesn't contain the IP yet
-				i.addRecord(domainName, nameServer, "A", "1.2.3.4")
+				i.addRecord(domainName, nameServer, "A", ipAddress)
 			}
 			logger.Infof("found updated registration for domain: %s", domainName)
 		}
