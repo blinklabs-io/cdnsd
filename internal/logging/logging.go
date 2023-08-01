@@ -41,7 +41,7 @@ func Setup() {
 	globalLogger = l.Sugar()
 }
 
-func GetLogger() *zap.SugaredLogger {
+func GetLogger() *Logger {
 	return globalLogger
 }
 

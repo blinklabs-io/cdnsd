@@ -17,6 +17,7 @@ import (
 	"github.com/blinklabs-io/chnsd/internal/dns"
 	"github.com/blinklabs-io/chnsd/internal/indexer"
 	"github.com/blinklabs-io/chnsd/internal/logging"
+	"github.com/blinklabs-io/chnsd/internal/state"
 )
 
 var cmdlineFlags struct {
@@ -46,14 +47,10 @@ func main() {
 		}
 	}()
 
-	/*
-		// Test node connection
-		if oConn, err := node.GetConnection(); err != nil {
-			logger.Fatalf("failed to connect to node: %s", err)
-		} else {
-			oConn.Close()
-		}
-	*/
+	// Load state
+	if err := state.GetState().Load(); err != nil {
+		logger.Fatalf("failed to load state: %s", err)
+	}
 
 	// Start debug listener
 	if cfg.Debug.ListenPort > 0 {
