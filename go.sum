@@ -1,8 +1,8 @@
 github.com/benbjohnson/clock v1.1.0 h1:Q92kusRqC1XV2MjkWETPvjJVqKetz1OzxZB7mHJLju8=
 github.com/blinklabs-io/gouroboros v0.48.0 h1:A3mqNX1C8QtW/CoIoF3iyXfKPrKyfyWfbjzdnkwj6Jw=
 github.com/blinklabs-io/gouroboros v0.48.0/go.mod h1:WBghLJF3Im3hXjMd8BFk929tfuSjcUZdn2zE2xtZJEo=
-github.com/blinklabs-io/snek v0.4.0 h1:IAuA4HBg2agK2XmOtvs9siJJJWwNCoI5fAl3UuMdIRg=
-github.com/blinklabs-io/snek v0.4.0/go.mod h1:3jwdMN/IsrpjsdZT4yqxtZVMt/2kXq/NaWvcS/lD42A=
+github.com/blinklabs-io/snek v0.5.0 h1://vQo5dp3aRUHrBaywyBZRDgS+Skh3ZgNusMhBNgwo0=
+github.com/blinklabs-io/snek v0.5.0/go.mod h1:MScjJA0cu7pbqkfsIbK5i2ucF+4pgk7ybqFdiRlzIsU=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

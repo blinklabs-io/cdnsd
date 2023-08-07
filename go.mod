@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	github.com/blinklabs-io/gouroboros v0.48.0
-	github.com/blinklabs-io/snek v0.4.0
+	github.com/blinklabs-io/snek v0.5.0
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/miekg/dns v1.1.55
 	go.uber.org/zap v1.24.0
