@@ -32,6 +32,7 @@ type Config struct {
 	Dns     DnsConfig     `yaml:"dns"`
 	Debug   DebugConfig   `yaml:"debug"`
 	Indexer IndexerConfig `yaml:"indexer"`
+	State   StateConfig   `yaml:"state"`
 }
 
 type LoggingConfig struct {
@@ -64,6 +65,10 @@ type IndexerConfig struct {
 	InterceptSlot uint64 `yaml:"interceptSlot" envconfig:"INDEXER_INTERCEPT_SLOT"`
 }
 
+type StateConfig struct {
+	Directory string `yaml:"dir" envconfig:"STATE_DIR"`
+}
+
 // Singleton config instance with default values
 var globalConfig = &Config{
 	Logging: LoggingConfig{
@@ -84,6 +89,9 @@ var globalConfig = &Config{
 	},
 	Indexer: IndexerConfig{
 		Network: "preprod",
+	},
+	State: StateConfig{
+		Directory: "./.state",
 	},
 }
 

@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/blinklabs-io/chnsd/internal/config"
-	"github.com/blinklabs-io/chnsd/internal/indexer"
 	"github.com/blinklabs-io/chnsd/internal/logging"
+	"github.com/blinklabs-io/chnsd/internal/state"
 
 	"github.com/miekg/dns"
 )
@@ -39,17 +39,22 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 	// Split query name into labels and lookup each domain and parent until we get a hit
 	queryLabels := dns.SplitDomainName(r.Question[0].Name)
 	for startLabelIdx := 0; startLabelIdx < len(queryLabels); startLabelIdx++ {
-		lookupDomainName := strings.Join(queryLabels[startLabelIdx:], ".") + `.`
-		domain := indexer.GetIndexer().LookupDomain(lookupDomainName)
-		if domain == nil {
+		lookupDomainName := strings.Join(queryLabels[startLabelIdx:], ".")
+		nameServers, err := state.GetState().LookupDomain(lookupDomainName)
+		if err != nil {
+			logger.Errorf("failed to lookup domain: %s", err)
+		}
+		if nameServers == nil {
 			continue
 		}
 		// Assemble response
 		m.SetReply(r)
-		for nameserver, ipAddress := range domain.Nameservers {
+		for nameserver, ipAddress := range nameServers {
+			// Add trailing dot to make everybody happy
+			nameserver = nameserver + `.`
 			// NS record
 			ns := &dns.NS{
-				Hdr: dns.RR_Header{Name: domain.Name, Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 999},
+				Hdr: dns.RR_Header{Name: (lookupDomainName + `.`), Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 999},
 				Ns:  nameserver,
 			}
 			m.Ns = append(m.Ns, ns)
