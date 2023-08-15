@@ -41,9 +41,10 @@ type LoggingConfig struct {
 }
 
 type DnsConfig struct {
-	ListenAddress   string   `yaml:"address" envconfig:"DNS_LISTEN_ADDRESS"`
-	ListenPort      uint     `yaml:"port" envconfig:"DNS_LISTEN_PORT"`
-	FallbackServers []string `yaml:"fallbackServers" envconfig:"DNS_FALLBACK_SERVERS"`
+	ListenAddress    string   `yaml:"address" envconfig:"DNS_LISTEN_ADDRESS"`
+	ListenPort       uint     `yaml:"port" envconfig:"DNS_LISTEN_PORT"`
+	RecursionEnabled bool     `yaml:"recursionEnabled" envconfig:"DNS_RECURSION"`
+	FallbackServers  []string `yaml:"fallbackServers" envconfig:"DNS_FALLBACK_SERVERS"`
 }
 
 type DebugConfig struct {
