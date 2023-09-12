@@ -4,7 +4,7 @@ go 1.20
 
 require (
 	github.com/blinklabs-io/gouroboros v0.53.0
-	github.com/blinklabs-io/snek v0.9.1
+	github.com/blinklabs-io/snek v0.10.0
 	github.com/dgraph-io/badger/v4 v4.2.0
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/miekg/dns v1.1.55
