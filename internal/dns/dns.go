@@ -38,6 +38,16 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 	cfg := config.GetConfig()
 	m := new(dns.Msg)
 
+	if cfg.Logging.QueryLog {
+		for _, q := range r.Question {
+			logger.Infof("query: name: %s, type: %s, class: %s",
+				q.Name,
+				dns.Type(q.Qtype).String(),
+				dns.Class(q.Qclass).String(),
+			)
+		}
+	}
+
 	// Split query name into labels and lookup each domain and parent until we get a hit
 	queryLabels := dns.SplitDomainName(r.Question[0].Name)
 	for startLabelIdx := 0; startLabelIdx < len(queryLabels); startLabelIdx++ {
