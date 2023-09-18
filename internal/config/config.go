@@ -38,6 +38,7 @@ type Config struct {
 type LoggingConfig struct {
 	Healthchecks bool   `yaml:"healthchecks" envconfig:"LOGGING_HEALTHCHECKS"`
 	Level        string `yaml:"level" envconfig:"LOGGING_LEVEL"`
+	QueryLog     bool   `yaml:"queryLog" envconfig:"LOGGING_QUERY_LOG"`
 }
 
 type DnsConfig struct {
@@ -76,6 +77,7 @@ var globalConfig = &Config{
 	Logging: LoggingConfig{
 		Level:        "info",
 		Healthchecks: false,
+		QueryLog:     true,
 	},
 	Dns: DnsConfig{
 		ListenAddress: "",
