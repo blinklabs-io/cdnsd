@@ -41,9 +41,9 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 	if cfg.Logging.QueryLog {
 		for _, q := range r.Question {
 			logger.Infof("query: name: %s, type: %s, class: %s",
-				fmt.Sprintf("%s", q.Name),
-				fmt.Sprintf("%s", dns.Type(q.Qtype).String()),
-				fmt.Sprintf("%s", dns.Class(q.Qclass).String()),
+				q.Name,
+				dns.Type(q.Qtype).String(),
+				dns.Class(q.Qclass).String(),
 			)
 		}
 	}
