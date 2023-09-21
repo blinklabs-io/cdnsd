@@ -13,11 +13,11 @@ import (
 	_ "net/http/pprof"
 	"os"
 
-	"github.com/blinklabs-io/chnsd/internal/config"
-	"github.com/blinklabs-io/chnsd/internal/dns"
-	"github.com/blinklabs-io/chnsd/internal/indexer"
-	"github.com/blinklabs-io/chnsd/internal/logging"
-	"github.com/blinklabs-io/chnsd/internal/state"
+	"github.com/blinklabs-io/cdnsd/internal/config"
+	"github.com/blinklabs-io/cdnsd/internal/dns"
+	"github.com/blinklabs-io/cdnsd/internal/indexer"
+	"github.com/blinklabs-io/cdnsd/internal/logging"
+	"github.com/blinklabs-io/cdnsd/internal/state"
 )
 
 var cmdlineFlags struct {

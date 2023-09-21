@@ -1,4 +1,4 @@
-module github.com/blinklabs-io/chnsd
+module github.com/blinklabs-io/cdnsd
 
 go 1.20
 

@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/blinklabs-io/chnsd/internal/config"
-	"github.com/blinklabs-io/chnsd/internal/logging"
+	"github.com/blinklabs-io/cdnsd/internal/config"
+	"github.com/blinklabs-io/cdnsd/internal/logging"
 	"github.com/dgraph-io/badger/v4"
 )
 
