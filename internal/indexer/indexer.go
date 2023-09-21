@@ -3,9 +3,9 @@ package indexer
 import (
 	"encoding/hex"
 
-	"github.com/blinklabs-io/chnsd/internal/config"
-	"github.com/blinklabs-io/chnsd/internal/logging"
-	"github.com/blinklabs-io/chnsd/internal/state"
+	"github.com/blinklabs-io/cdnsd/internal/config"
+	"github.com/blinklabs-io/cdnsd/internal/logging"
+	"github.com/blinklabs-io/cdnsd/internal/state"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
 	ocommon "github.com/blinklabs-io/gouroboros/protocol/common"

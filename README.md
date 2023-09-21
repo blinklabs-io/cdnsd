@@ -1,2 +1,2 @@
-# chnsd
+# cdnsd
 Resolver for .cardano Handshake domains

@@ -4,6 +4,6 @@ WORKDIR /code
 COPY . .
 RUN make build
 
-FROM cgr.dev/chainguard/glibc-dynamic AS chnsd
-COPY --from=build /code/chnsd /bin/
-ENTRYPOINT ["chnsd"]
+FROM cgr.dev/chainguard/glibc-dynamic AS cdnsd
+COPY --from=build /code/cdnsd /bin/
+ENTRYPOINT ["cdnsd"]

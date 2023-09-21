@@ -4,7 +4,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/blinklabs-io/chnsd/internal/config"
+	"github.com/blinklabs-io/cdnsd/internal/config"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
