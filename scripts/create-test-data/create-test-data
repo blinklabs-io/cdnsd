@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+
+_deno_image='denoland/deno:1.37.2'
+_deno_flags=(
+	'--allow-net'
+	'--allow-read'
+	'--allow-env'
+)
+
+_script_dir=$(cd $(dirname $0); pwd)
+
+docker run \
+	-ti --rm \
+	-v ${_script_dir}:/app \
+	-v $(pwd):/work \
+	-v ${HOME}/.deno:/deno-dir \
+	-w /work \
+	-e MAESTRO_API_KEY=${MAESTRO_API_KEY} \
+	"${_deno_image}" \
+	run "${_deno_flags[@]}" /app/main.ts generate "$@"
