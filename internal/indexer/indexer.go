@@ -132,11 +132,12 @@ func (i *Indexer) Start() error {
 func (i *Indexer) handleEvent(evt event.Event) error {
 	logger := logging.GetLogger()
 	eventTx := evt.Payload.(input_chainsync.TransactionEvent)
+	eventCtx := evt.Context.(input_chainsync.TransactionContext)
 	for _, txOutput := range eventTx.Outputs {
 		datum := txOutput.Datum()
 		if datum != nil {
 			if _, err := datum.Decode(); err != nil {
-				logger.Warnf("error decoding TX (%s) output datum: %s", eventTx.TransactionHash, err)
+				logger.Warnf("error decoding TX (%s) output datum: %s", eventCtx.TransactionHash, err)
 				return err
 			}
 			datumFields := datum.Value().(cbor.Constructor).Fields()
