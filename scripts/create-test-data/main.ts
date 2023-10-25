@@ -15,7 +15,7 @@ const generate = new Command()
   .description("Generate an unsigned TX with the test domain data")
   .env("MAESTRO_API_KEY=<value:string>", "Maestro API key", { required: true })
   .option("-D, --domain <domain>", "Domain to create test data for", { required: true })
-  .option("-n, --nameserver <nameserver>", "Nameserver for domain (can be specified multiple times)", { collect: true, required: true })
+  .option("-n, --nameserver <nameserver>", "Nameserver for domain, specified as a <hostname,ipaddress> pair (can be specified multiple times)", { collect: true, required: true })
   .option("-s, --source-address <address>", "Source wallet address to send from (you must be able to sign transactions for this)", { required: true })
   .option("-d, --dest-address <address>", "Destination wallet address to send to (this will be read by cdnsd)", { required: true })
   .action(async ({ maestroApiKey, domain, nameserver, sourceAddress, destAddress }) => {
@@ -33,10 +33,21 @@ const generate = new Command()
     // TODO: update datum format
     const outDatum = new Constr(0, [
       fromText(domain),
-      new Constr(0, nameserver.map(nameserver => fromText(nameserver))),
+      // [ Constr(0, ...), Constr(0, ...), ... ]
+      nameserver.map(
+        nameserver => new Constr(
+          0,
+          // Split nameserver hostname and IP address and convert both to bytestrings
+          nameserver.split(",").map(
+            nameserver => fromText(nameserver),
+          ),
+        ),
+      ),
     ]);
 
     const outDatumEncoded = Data.to(outDatum);
+
+    //console.log(`outDatumEncoded = ${outDatumEncoded}`)
 
     try {
       const txOut = await lucid
