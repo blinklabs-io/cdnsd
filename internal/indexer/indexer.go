@@ -23,8 +23,9 @@ type Domain struct {
 }
 
 type Indexer struct {
-	pipeline *pipeline.Pipeline
-	domains  map[string]Domain
+	pipeline   *pipeline.Pipeline
+	domains    map[string]Domain
+	tipReached bool
 }
 
 // Singleton indexer instance
@@ -43,7 +44,12 @@ func (i *Indexer) Start() error {
 			if err := state.GetState().UpdateCursor(status.SlotNumber, status.BlockHash); err != nil {
 				logger.Errorf("failed to update cursor: %s", err)
 			}
+			if !i.tipReached && status.TipReached {
+				i.tipReached = true
+				logger.Infof("caught up to chain tip")
+			}
 		}),
+		input_chainsync.WithBulkMode(true),
 	}
 	if cfg.Indexer.NetworkMagic > 0 {
 		inputOpts = append(
