@@ -76,11 +76,18 @@ func (s *State) GetCursor() (uint64, string, error) {
 	return slotNumber, blockHash, err
 }
 
-func (s *State) UpdateDomain(domainName string, nameServers map[string]string) error {
+func (s *State) UpdateDomain(
+	domainName string,
+	nameServers map[string]string,
+) error {
 	err := s.db.Update(func(txn *badger.Txn) error {
 		// TODO: find any existing keys for domain and delete
 		for nameServer, ipAddress := range nameServers {
-			key := fmt.Sprintf("domain_%s_nameserver_%s", domainName, nameServer)
+			key := fmt.Sprintf(
+				"domain_%s_nameserver_%s",
+				domainName,
+				nameServer,
+			)
 			if err := txn.Set([]byte(key), []byte(ipAddress)); err != nil {
 				return err
 			}
