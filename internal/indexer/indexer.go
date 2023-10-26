@@ -40,15 +40,17 @@ func (i *Indexer) Start() error {
 	i.pipeline = pipeline.New()
 	// Configure pipeline input
 	inputOpts := []input_chainsync.ChainSyncOptionFunc{
-		input_chainsync.WithStatusUpdateFunc(func(status input_chainsync.ChainSyncStatus) {
-			if err := state.GetState().UpdateCursor(status.SlotNumber, status.BlockHash); err != nil {
-				logger.Errorf("failed to update cursor: %s", err)
-			}
-			if !i.tipReached && status.TipReached {
-				i.tipReached = true
-				logger.Infof("caught up to chain tip")
-			}
-		}),
+		input_chainsync.WithStatusUpdateFunc(
+			func(status input_chainsync.ChainSyncStatus) {
+				if err := state.GetState().UpdateCursor(status.SlotNumber, status.BlockHash); err != nil {
+					logger.Errorf("failed to update cursor: %s", err)
+				}
+				if !i.tipReached && status.TipReached {
+					i.tipReached = true
+					logger.Infof("caught up to chain tip")
+				}
+			},
+		),
 		input_chainsync.WithBulkMode(true),
 	}
 	if cfg.Indexer.NetworkMagic > 0 {
@@ -67,7 +69,11 @@ func (i *Indexer) Start() error {
 		return err
 	}
 	if cursorSlotNumber > 0 {
-		logger.Infof("found previous chainsync cursor: %d, %s", cursorSlotNumber, cursorBlockHash)
+		logger.Infof(
+			"found previous chainsync cursor: %d, %s",
+			cursorSlotNumber,
+			cursorBlockHash,
+		)
 		hashBytes, err := hex.DecodeString(cursorBlockHash)
 		if err != nil {
 			return err
@@ -143,7 +149,11 @@ func (i *Indexer) handleEvent(evt event.Event) error {
 		datum := txOutput.Datum()
 		if datum != nil {
 			if _, err := datum.Decode(); err != nil {
-				logger.Warnf("error decoding TX (%s) output datum: %s", eventCtx.TransactionHash, err)
+				logger.Warnf(
+					"error decoding TX (%s) output datum: %s",
+					eventCtx.TransactionHash,
+					err,
+				)
 				return err
 			}
 			datumFields := datum.Value().(cbor.Constructor).Fields()
@@ -151,14 +161,21 @@ func (i *Indexer) handleEvent(evt event.Event) error {
 			nameServers := map[string]string{}
 			for _, record := range datumFields[1].([]any) {
 				recordConstructor := record.(cbor.Constructor)
-				nameServer := string(recordConstructor.Fields()[0].(cbor.ByteString).Bytes())
-				ipAddress := string(recordConstructor.Fields()[1].(cbor.ByteString).Bytes())
+				nameServer := string(
+					recordConstructor.Fields()[0].(cbor.ByteString).Bytes(),
+				)
+				ipAddress := string(
+					recordConstructor.Fields()[1].(cbor.ByteString).Bytes(),
+				)
 				nameServers[nameServer] = ipAddress
 			}
 			if err := state.GetState().UpdateDomain(domainName, nameServers); err != nil {
 				return err
 			}
-			logger.Infof("found updated registration for domain: %s", domainName)
+			logger.Infof(
+				"found updated registration for domain: %s",
+				domainName,
+			)
 		}
 	}
 	return nil

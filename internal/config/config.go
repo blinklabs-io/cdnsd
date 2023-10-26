@@ -37,32 +37,32 @@ type Config struct {
 
 type LoggingConfig struct {
 	Healthchecks bool   `yaml:"healthchecks" envconfig:"LOGGING_HEALTHCHECKS"`
-	Level        string `yaml:"level" envconfig:"LOGGING_LEVEL"`
-	QueryLog     bool   `yaml:"queryLog" envconfig:"LOGGING_QUERY_LOG"`
+	Level        string `yaml:"level"        envconfig:"LOGGING_LEVEL"`
+	QueryLog     bool   `yaml:"queryLog"     envconfig:"LOGGING_QUERY_LOG"`
 }
 
 type DnsConfig struct {
-	ListenAddress    string   `yaml:"address" envconfig:"DNS_LISTEN_ADDRESS"`
-	ListenPort       uint     `yaml:"port" envconfig:"DNS_LISTEN_PORT"`
+	ListenAddress    string   `yaml:"address"          envconfig:"DNS_LISTEN_ADDRESS"`
+	ListenPort       uint     `yaml:"port"             envconfig:"DNS_LISTEN_PORT"`
 	RecursionEnabled bool     `yaml:"recursionEnabled" envconfig:"DNS_RECURSION"`
-	FallbackServers  []string `yaml:"fallbackServers" envconfig:"DNS_FALLBACK_SERVERS"`
+	FallbackServers  []string `yaml:"fallbackServers"  envconfig:"DNS_FALLBACK_SERVERS"`
 }
 
 type DebugConfig struct {
 	ListenAddress string `yaml:"address" envconfig:"DEBUG_ADDRESS"`
-	ListenPort    uint   `yaml:"port" envconfig:"DEBUG_PORT"`
+	ListenPort    uint   `yaml:"port"    envconfig:"DEBUG_PORT"`
 }
 
 type MetricsConfig struct {
 	ListenAddress string `yaml:"address" envconfig:"METRICS_LISTEN_ADDRESS"`
-	ListenPort    uint   `yaml:"port" envconfig:"METRICS_LISTEN_PORT"`
+	ListenPort    uint   `yaml:"port"    envconfig:"METRICS_LISTEN_PORT"`
 }
 
 type IndexerConfig struct {
-	Network       string `yaml:"network" envconfig:"INDEXER_NETWORK"`
-	NetworkMagic  uint32 `yaml:"networkMagic" envconfig:"INDEXER_NETWORK_MAGIC"`
-	Address       string `yaml:"address" envconfig:"INDEXER_TCP_ADDRESS"`
-	SocketPath    string `yaml:"socketPath" envconfig:"INDEXER_SOCKET_PATH"`
+	Network       string `yaml:"network"       envconfig:"INDEXER_NETWORK"`
+	NetworkMagic  uint32 `yaml:"networkMagic"  envconfig:"INDEXER_NETWORK_MAGIC"`
+	Address       string `yaml:"address"       envconfig:"INDEXER_TCP_ADDRESS"`
+	SocketPath    string `yaml:"socketPath"    envconfig:"INDEXER_SOCKET_PATH"`
 	ScriptAddress string `yaml:"scriptAddress" envconfig:"INDEXER_SCRIPT_ADDRESS"`
 	InterceptHash string `yaml:"interceptHash" envconfig:"INDEXER_INTERCEPT_HASH"`
 	InterceptSlot uint64 `yaml:"interceptSlot" envconfig:"INDEXER_INTERCEPT_SLOT"`
@@ -83,7 +83,11 @@ var globalConfig = &Config{
 		ListenAddress: "",
 		ListenPort:    8053,
 		// hdns.io
-		FallbackServers: []string{"103.196.38.38", "103.196.38.39", "103.196.38.40"},
+		FallbackServers: []string{
+			"103.196.38.38",
+			"103.196.38.39",
+			"103.196.38.40",
+		},
 	},
 	Debug: DebugConfig{
 		ListenAddress: "localhost",

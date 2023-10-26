@@ -15,14 +15,28 @@ import (
 
 func Start() error {
 	cfg := config.GetConfig()
-	listenAddr := fmt.Sprintf("%s:%d", cfg.Dns.ListenAddress, cfg.Dns.ListenPort)
+	listenAddr := fmt.Sprintf(
+		"%s:%d",
+		cfg.Dns.ListenAddress,
+		cfg.Dns.ListenPort,
+	)
 	// Setup handler
 	dns.HandleFunc(".", handleQuery)
 	// UDP listener
-	serverUdp := &dns.Server{Addr: listenAddr, Net: "udp", TsigSecret: nil, ReusePort: true}
+	serverUdp := &dns.Server{
+		Addr:       listenAddr,
+		Net:        "udp",
+		TsigSecret: nil,
+		ReusePort:  true,
+	}
 	go startListener(serverUdp)
 	// TCP listener
-	serverTcp := &dns.Server{Addr: listenAddr, Net: "tcp", TsigSecret: nil, ReusePort: true}
+	serverTcp := &dns.Server{
+		Addr:       listenAddr,
+		Net:        "tcp",
+		TsigSecret: nil,
+		ReusePort:  true,
+	}
 	go startListener(serverTcp)
 	return nil
 }
@@ -48,9 +62,15 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 		}
 	}
 
-	nameserverDomain, nameservers, err := findNameserversForDomain(r.Question[0].Name)
+	nameserverDomain, nameservers, err := findNameserversForDomain(
+		r.Question[0].Name,
+	)
 	if err != nil {
-		logger.Errorf("failed to lookup nameservers for %s: %s", r.Question[0].Name, err)
+		logger.Errorf(
+			"failed to lookup nameservers for %s: %s",
+			r.Question[0].Name,
+			err,
+		)
 	}
 	if nameservers != nil {
 		// Assemble response
@@ -158,12 +178,23 @@ func doQuery(msg *dns.Msg, address string, recursive bool) (*dns.Msg, error) {
 	if !strings.Contains(address, ":") {
 		address = address + `:53`
 	}
-	logger.Debugf("querying %s: %s", address, formatMessageQuestionSection(msg.Question))
+	logger.Debugf(
+		"querying %s: %s",
+		address,
+		formatMessageQuestionSection(msg.Question),
+	)
 	resp, err := dns.Exchange(msg, address)
 	if err != nil {
 		return nil, err
 	}
-	logger.Debugf("response: rcode=%s, authoritative=%v, authority=%s, answer=%s, extra=%s", dns.RcodeToString[resp.Rcode], resp.Authoritative, formatMessageAnswerSection(resp.Ns), formatMessageAnswerSection(resp.Answer), formatMessageAnswerSection(resp.Extra))
+	logger.Debugf(
+		"response: rcode=%s, authoritative=%v, authority=%s, answer=%s, extra=%s",
+		dns.RcodeToString[resp.Rcode],
+		resp.Authoritative,
+		formatMessageAnswerSection(resp.Ns),
+		formatMessageAnswerSection(resp.Answer),
+		formatMessageAnswerSection(resp.Extra),
+	)
 	// Immediately return authoritative response
 	if resp.Authoritative {
 		return resp, nil
@@ -195,7 +226,9 @@ func doQuery(msg *dns.Msg, address string, recursive bool) (*dns.Msg, error) {
 	return resp, nil
 }
 
-func findNameserversForDomain(recordName string) (string, map[string][]net.IP, error) {
+func findNameserversForDomain(
+	recordName string,
+) (string, map[string][]net.IP, error) {
 	cfg := config.GetConfig()
 
 	// Split record name into labels and lookup each domain and parent until we get a hit
@@ -223,7 +256,9 @@ func findNameserversForDomain(recordName string) (string, map[string][]net.IP, e
 		// Pick random fallback server
 		fallbackServer := randomFallbackServer()
 		for startLabelIdx := 0; startLabelIdx < len(queryLabels); startLabelIdx++ {
-			lookupDomainName := dns.Fqdn(strings.Join(queryLabels[startLabelIdx:], "."))
+			lookupDomainName := dns.Fqdn(
+				strings.Join(queryLabels[startLabelIdx:], "."),
+			)
 			m := createQuery(lookupDomainName, dns.TypeNS)
 			in, err := doQuery(m, fallbackServer, false)
 			if err != nil {
