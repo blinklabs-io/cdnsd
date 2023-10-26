@@ -62,6 +62,45 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 		}
 	}
 
+	// Check for known record for domain nameserver
+	records, err := state.GetState().LookupNameserverRecord(
+		strings.TrimSuffix(r.Question[0].Name, "."),
+	)
+	if err != nil {
+		logger.Errorf("failed to lookup record in state: %s", err)
+		return
+	}
+	if records != nil {
+		// Assemble response
+		m.SetReply(r)
+		for k, v := range records {
+			k = dns.Fqdn(k)
+			address := net.ParseIP(v)
+			// A or AAAA record
+			if address.To4() != nil {
+				// IPv4
+				a := &dns.A{
+					Hdr: dns.RR_Header{Name: k, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 999},
+					A:   address,
+				}
+				m.Answer = append(m.Answer, a)
+			} else {
+				// IPv6
+				aaaa := &dns.AAAA{
+					Hdr:  dns.RR_Header{Name: k, Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: 999},
+					AAAA: address,
+				}
+				m.Answer = append(m.Answer, aaaa)
+			}
+		}
+		// Send response
+		if err := w.WriteMsg(m); err != nil {
+			logger.Errorf("failed to write response: %s", err)
+		}
+		// We found our answer, to return from handler
+		return
+	}
+
 	nameserverDomain, nameservers, err := findNameserversForDomain(
 		r.Question[0].Name,
 	)
