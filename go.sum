@@ -1,9 +1,9 @@
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
-github.com/blinklabs-io/gouroboros v0.57.0 h1:k5Y706vvYAGM3bCtEhh6WRHGrvS3S6n1MT9vNLFAe/E=
-github.com/blinklabs-io/gouroboros v0.57.0/go.mod h1:D5YJka8EyVmiXNMbRvjH23H9lNMLA4+qSlNNC/j7R0k=
-github.com/blinklabs-io/snek v0.13.0 h1:RrQ5hz16uh+CrZrKTYeU0w9ed1FS0k2kj+U7GhzmCfw=
-github.com/blinklabs-io/snek v0.13.0/go.mod h1:dOY/geKaREHPP8SPm6YmtJJVaX1w1uI1SP+F5QzoG24=
+github.com/blinklabs-io/gouroboros v0.59.0 h1:oNJrxg3CEmWoq1hPav9p1lkdDcnCy10AlGDfjHTf/8M=
+github.com/blinklabs-io/gouroboros v0.59.0/go.mod h1:D5YJka8EyVmiXNMbRvjH23H9lNMLA4+qSlNNC/j7R0k=
+github.com/blinklabs-io/snek v0.14.0 h1:r2Lf1AZBCT3mLx9f8z2qt6VFY48LKdq+LlN4nxhCL3Y=
+github.com/blinklabs-io/snek v0.14.0/go.mod h1:I+V+LQY5It+ifYaAKLqZ6AEzbiMvxvK3YanwkHUXrlQ=
 github.com/cespare/xxhash/v2 v2.1.1/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
 github.com/cespare/xxhash/v2 v2.2.0 h1:DC2CZ1Ep5Y4k3ZQ899DldepgrayRUGE6BBZ/cd9Cj44=
 github.com/cespare/xxhash/v2 v2.2.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
