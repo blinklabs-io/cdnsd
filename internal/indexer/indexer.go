@@ -52,6 +52,8 @@ func (i *Indexer) Start() error {
 			},
 		),
 		input_chainsync.WithBulkMode(true),
+		input_chainsync.WithAutoReconnect(true),
+		input_chainsync.WithLogger(logger),
 	}
 	if cfg.Indexer.NetworkMagic > 0 {
 		inputOpts = append(
