@@ -80,8 +80,13 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 			if address.To4() != nil {
 				// IPv4
 				a := &dns.A{
-					Hdr: dns.RR_Header{Name: k, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 999},
-					A:   address,
+					Hdr: dns.RR_Header{
+						Name:   k,
+						Rrtype: dns.TypeA,
+						Class:  dns.ClassINET,
+						Ttl:    999,
+					},
+					A: address,
 				}
 				m.Answer = append(m.Answer, a)
 			} else {

@@ -128,7 +128,9 @@ func (s *State) LookupDomain(domainName string) (map[string]string, error) {
 }
 
 // LookupNameserverRecord searches the domain nameserver entries for one matching the requested record
-func (s *State) LookupNameserverRecord(recordName string) (map[string]string, error) {
+func (s *State) LookupNameserverRecord(
+	recordName string,
+) (map[string]string, error) {
 	ret := map[string]string{}
 	err := s.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
@@ -139,7 +141,10 @@ func (s *State) LookupNameserverRecord(recordName string) (map[string]string, er
 		for it.Rewind(); it.Valid(); it.Next() {
 			item := it.Item()
 			k := item.Key()
-			if strings.HasSuffix(string(k), fmt.Sprintf("_nameserver_%s", recordName)) {
+			if strings.HasSuffix(
+				string(k),
+				fmt.Sprintf("_nameserver_%s", recordName),
+			) {
 				err := item.Value(func(v []byte) error {
 					ret[recordName] = string(v)
 					return nil
