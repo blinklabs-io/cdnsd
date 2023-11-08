@@ -13,7 +13,7 @@ GOMODULE=$(shell grep ^module $(ROOT_DIR)/go.mod | awk '{ print $$2 }')
 # Set version strings based on git tag and current ref
 GO_LDFLAGS=-ldflags "-s -w"
 
-.PHONY: build mod-tidy clean test
+.PHONY: build mod-tidy clean format golines test
 
 # Alias for building program binary
 build: $(BINARIES)
@@ -24,6 +24,12 @@ mod-tidy:
 
 clean:
 	rm -f $(BINARIES)
+
+format:
+	go fmt ./...
+
+golines:
+	golines -w --ignore-generated --chain-split-dots --max-len=80 --reformat-tags .
 
 test: mod-tidy
 	go test -v ./...
