@@ -8,11 +8,13 @@ package indexer
 
 import (
 	"encoding/hex"
+	"strings"
 
 	"github.com/blinklabs-io/cdnsd/internal/config"
 	"github.com/blinklabs-io/cdnsd/internal/logging"
 	"github.com/blinklabs-io/cdnsd/internal/state"
 
+	models "github.com/blinklabs-io/cardano-models"
 	"github.com/blinklabs-io/gouroboros/cbor"
 	ocommon "github.com/blinklabs-io/gouroboros/protocol/common"
 	"github.com/blinklabs-io/snek/event"
@@ -156,26 +158,28 @@ func (i *Indexer) handleEvent(evt event.Event) error {
 	for _, txOutput := range eventTx.Outputs {
 		datum := txOutput.Datum()
 		if datum != nil {
-			if _, err := datum.Decode(); err != nil {
+			var dnsDomain models.CardanoDnsDomain
+			if _, err := cbor.Decode(datum.Cbor(), &dnsDomain); err != nil {
 				logger.Warnf(
 					"error decoding TX (%s) output datum: %s",
 					eventCtx.TransactionHash,
 					err,
 				)
-				return err
+				// Stop processing TX output if we can't parse the datum
+				continue
 			}
-			datumFields := datum.Value().(cbor.Constructor).Fields()
-			domainName := string(datumFields[0].(cbor.ByteString).Bytes())
+			domainName := string(dnsDomain.Origin)
 			nameServers := map[string]string{}
-			for _, record := range datumFields[1].([]any) {
-				recordConstructor := record.(cbor.Constructor)
-				nameServer := string(
-					recordConstructor.Fields()[0].(cbor.ByteString).Bytes(),
-				)
-				ipAddress := string(
-					recordConstructor.Fields()[1].(cbor.ByteString).Bytes(),
-				)
-				nameServers[nameServer] = ipAddress
+			for _, record := range dnsDomain.Records {
+				// NOTE: we're losing information here, but we need to revamp the storage
+				// format before we can use it. We're also making the assumption that all
+				// records are for nameservers
+				switch strings.ToUpper(string(record.Type)) {
+				case "A", "AAAA":
+					nameServers[string(record.Lhs)] = string(record.Rhs)
+				default:
+					continue
+				}
 			}
 			if err := state.GetState().UpdateDomain(domainName, nameServers); err != nil {
 				return err

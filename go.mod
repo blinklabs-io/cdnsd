@@ -3,7 +3,8 @@ module github.com/blinklabs-io/cdnsd
 go 1.20
 
 require (
-	github.com/blinklabs-io/gouroboros v0.62.0
+	github.com/blinklabs-io/cardano-models v0.1.0
+	github.com/blinklabs-io/gouroboros v0.64.0
 	github.com/blinklabs-io/snek v0.15.0
 	github.com/dgraph-io/badger/v4 v4.2.0
 	github.com/kelseyhightower/envconfig v1.4.0
@@ -29,10 +30,10 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	go.opencensus.io v0.22.5 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
-	golang.org/x/crypto v0.14.0 // indirect
+	golang.org/x/crypto v0.15.0 // indirect
 	golang.org/x/mod v0.13.0 // indirect
 	golang.org/x/net v0.17.0 // indirect
-	golang.org/x/sys v0.13.0 // indirect
+	golang.org/x/sys v0.14.0 // indirect
 	golang.org/x/tools v0.14.0 // indirect
 	google.golang.org/protobuf v1.31.0 // indirect
 )
