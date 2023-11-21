@@ -131,15 +131,19 @@ func Load(configFile string) (*Config, error) {
 		return nil, fmt.Errorf("error processing environment: %s", err)
 	}
 	// Provide default script address for named network
-	if scriptAddress, ok := networkScriptAddresses[globalConfig.Indexer.Network]; ok {
-		globalConfig.Indexer.ScriptAddress = scriptAddress
-	} else {
-		return nil, fmt.Errorf("no built-in script address for specified network, please provide one")
+	if globalConfig.Indexer.ScriptAddress == "" {
+		if scriptAddress, ok := networkScriptAddresses[globalConfig.Indexer.Network]; ok {
+			globalConfig.Indexer.ScriptAddress = scriptAddress
+		} else {
+			return nil, fmt.Errorf("no built-in script address for specified network, please provide one")
+		}
 	}
 	// Provide default intercept point for named network
-	if interceptPoint, ok := networkInterceptPoints[globalConfig.Indexer.Network]; ok {
-		globalConfig.Indexer.InterceptHash = interceptPoint.Hash
-		globalConfig.Indexer.InterceptSlot = interceptPoint.Slot
+	if globalConfig.Indexer.InterceptSlot == 0 || globalConfig.Indexer.InterceptHash == "" {
+		if interceptPoint, ok := networkInterceptPoints[globalConfig.Indexer.Network]; ok {
+			globalConfig.Indexer.InterceptHash = interceptPoint.Hash
+			globalConfig.Indexer.InterceptSlot = interceptPoint.Slot
+		}
 	}
 	return globalConfig, nil
 }
