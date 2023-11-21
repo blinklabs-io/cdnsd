@@ -15,10 +15,23 @@ const generate = new Command()
   .description("Generate an unsigned TX with the test domain data")
   .env("MAESTRO_API_KEY=<value:string>", "Maestro API key", { required: true })
   .option("-D, --domain <domain>", "Domain to create test data for", { required: true })
-  .option("-r, --record <record>", "Record for domain, specified as: <name>[,<ttl>],<type>,<value> (can be specified multiple times)", { collect: true, required: true })
+  .option("-n, --nameserver <nameserver>", "Nameserver for domain, specified as: <name>,<ipaddr> (can be specified multiple times)", { collect: true, required: true })
+  .option("-r, --record <record>", "Record for domain, specified as: <name>[,<ttl>],<type>,<value> (can be specified multiple times)", { collect: true })
   .option("-s, --source-address <address>", "Source wallet address to send from (you must be able to sign transactions for this)", { required: true })
   .option("-d, --dest-address <address>", "Destination wallet address to send to (this will be read by cdnsd)", { required: true })
-  .action(async ({ maestroApiKey, domain, record, sourceAddress, destAddress }) => {
+  .action(async ({ maestroApiKey, domain, nameserver, record, sourceAddress, destAddress }) => {
+    // Merge --nameserver and --record values
+    let records = []
+    for (var tmpNameserver of nameserver) {
+      const tmpNameserverParts = tmpNameserver.split(",")
+      // Nameservers for a domain need both a NS record on the domain and an A record for themselves
+      records.push(`${domain},ns,${tmpNameserverParts[0]}`)
+      records.push(`${tmpNameserverParts[0]},a,${tmpNameserverParts[1]}`)
+    }
+    for (var tmpRecord in record) {
+      records.push(tmpRecord)
+    }
+
     console.log(`Building transaction...`);
 
     const provider = new Maestro({
@@ -31,7 +44,7 @@ const generate = new Command()
     lucid.selectWalletFrom({ address: sourceAddress });
 
     let outDatumRecords = []
-    record.forEach((tmpRecord) => {
+    records.forEach((tmpRecord) => {
       const recordParts = tmpRecord.split(",")
       if (recordParts.length == 3) {
         outDatumRecords.push(new Constr(
