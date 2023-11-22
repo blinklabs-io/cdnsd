@@ -284,6 +284,11 @@ func findNameserversForDomain(
 	// Split record name into labels and lookup each domain and parent until we get a hit
 	queryLabels := dns.SplitDomainName(recordName)
 
+	// Special case for root domain
+	if queryLabels == nil {
+		queryLabels = append(queryLabels, "")
+	}
+
 	// Check on-chain domains first
 	for startLabelIdx := 0; startLabelIdx < len(queryLabels); startLabelIdx++ {
 		lookupDomainName := strings.Join(queryLabels[startLabelIdx:], ".")
