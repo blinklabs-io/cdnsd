@@ -19,7 +19,8 @@ const generate = new Command()
   .option("-r, --record <record>", "Record for domain, specified as: <name>[,<ttl>],<type>,<value> (can be specified multiple times)", { collect: true })
   .option("-s, --source-address <address>", "Source wallet address to send from (you must be able to sign transactions for this)", { required: true })
   .option("-d, --dest-address <address>", "Destination wallet address to send to (this will be read by cdnsd)", { required: true })
-  .action(async ({ maestroApiKey, domain, nameserver, record, sourceAddress, destAddress }) => {
+  .option("-o, --output <file>", "Output file for generated transaction")
+  .action(async ({ maestroApiKey, domain, nameserver, record, sourceAddress, destAddress, output }) => {
     // Merge --nameserver and --record values
     let records = []
     for (var tmpNameserver of nameserver) {
@@ -97,8 +98,14 @@ const generate = new Command()
         "description": "unsigned",
         "cborHex": txOut.toString(),
       };
-      console.log(`\nTX (unsigned):\n`);
-      console.log(JSON.stringify(txJsonObj));
+      const txJson = JSON.stringify(txJsonObj)
+
+      if (output === undefined) {
+        output = `./tx-cdnsd-test-data-${domain}-${txOut.toHash()}.json`
+      }
+      Deno.writeTextFileSync(output, txJson)
+
+      console.log(`\nWrote tranaction to output file: ${output}`)
       console.log(`\nNOTE: you must import this transaction into a wallet such as Eternl to sign and submit it`);
     } catch (e) {
       console.log(e);
