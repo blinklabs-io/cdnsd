@@ -292,6 +292,8 @@ func findNameserversForDomain(
 	// Check on-chain domains first
 	for startLabelIdx := 0; startLabelIdx < len(queryLabels); startLabelIdx++ {
 		lookupDomainName := strings.Join(queryLabels[startLabelIdx:], ".")
+		// Convert to canonical form for consistency
+		lookupDomainName = dns.CanonicalName(lookupDomainName)
 		nameservers, err := state.GetState().LookupDomain(lookupDomainName)
 		if err != nil {
 			return "", nil, err
