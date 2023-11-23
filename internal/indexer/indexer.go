@@ -23,6 +23,7 @@ import (
 	input_chainsync "github.com/blinklabs-io/snek/input/chainsync"
 	output_embedded "github.com/blinklabs-io/snek/output/embedded"
 	"github.com/blinklabs-io/snek/pipeline"
+	"github.com/miekg/dns"
 )
 
 type Domain struct {
@@ -169,6 +170,8 @@ func (i *Indexer) handleEvent(evt event.Event) error {
 				continue
 			}
 			domainName := string(dnsDomain.Origin)
+			// Convert to canonical form for consistency
+			domainName = dns.CanonicalName(domainName)
 			nameServers := map[string]string{}
 			for _, record := range dnsDomain.Records {
 				// NOTE: we're losing information here, but we need to revamp the storage
