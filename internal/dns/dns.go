@@ -301,7 +301,7 @@ func findNameserversForDomain(
 		if nameservers != nil {
 			ret := map[string][]net.IP{}
 			for k, v := range nameservers {
-				k = k + `.`
+				k = dns.Fqdn(k)
 				ret[k] = append(ret[k], net.ParseIP(v))
 			}
 			return dns.Fqdn(lookupDomainName), ret, nil
