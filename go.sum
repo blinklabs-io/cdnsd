@@ -4,8 +4,8 @@ github.com/blinklabs-io/cardano-models v0.2.0 h1:fQ2vkvMLFgQodtFpYE73i+6+eNN5vaI
 github.com/blinklabs-io/cardano-models v0.2.0/go.mod h1:iH8IqSca4WzFQIAT3Ssd3TviILfoCgaJQ8mc3JrIvwE=
 github.com/blinklabs-io/gouroboros v0.69.3 h1:PDyjXhYkCNyr/vDbEydIiA7GNVSgcXgNwdCQt0ACzlA=
 github.com/blinklabs-io/gouroboros v0.69.3/go.mod h1:ppm97qgdO1ZsfrrziSgmRRChtESfLtGaUcn9UN1Ft5A=
-github.com/blinklabs-io/snek v0.17.0 h1:c7g9+2UYyAunMFBOs2hoomIUFkVQNB8ZHTCvCGKSQ0E=
-github.com/blinklabs-io/snek v0.17.0/go.mod h1:2WpL9BHe3EvrqcZKjmgQEk48pd1hOUumGexulOvh/Ew=
+github.com/blinklabs-io/snek v0.17.1 h1:3u5eBTWF9tHQSNnHtHs7AQVSdX99xtqiPS5Hk7EU1qE=
+github.com/blinklabs-io/snek v0.17.1/go.mod h1:6XJ2eDcU4n5V6TgpLDod+YD7pM43JOXcCiNOrDhdtKY=
 github.com/cespare/xxhash/v2 v2.1.1/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
 github.com/cespare/xxhash/v2 v2.2.0 h1:DC2CZ1Ep5Y4k3ZQ899DldepgrayRUGE6BBZ/cd9Cj44=
 github.com/cespare/xxhash/v2 v2.2.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
