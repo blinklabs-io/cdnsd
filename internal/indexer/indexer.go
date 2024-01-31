@@ -153,6 +153,7 @@ func (i *Indexer) Start() error {
 }
 
 func (i *Indexer) handleEvent(evt event.Event) error {
+	cfg := config.GetConfig()
 	logger := logging.GetLogger()
 	eventTx := evt.Payload.(input_chainsync.TransactionEvent)
 	eventCtx := evt.Context.(input_chainsync.TransactionContext)
@@ -169,17 +170,82 @@ func (i *Indexer) handleEvent(evt event.Event) error {
 				// Stop processing TX output if we can't parse the datum
 				continue
 			}
-			domainName := string(dnsDomain.Origin)
-			// Convert to canonical form for consistency
-			domainName = dns.CanonicalName(domainName)
+			origin := string(dnsDomain.Origin)
+			// Convert origin to canonical form for consistency
+			// This mostly means adding a trailing period if it doesn't have one
+			domainName := dns.CanonicalName(origin)
+			// We want an empty value for the TLD root for convenience
+			if domainName == `.` {
+				domainName = ``
+			}
+			// Append TLD
+			domainName = dns.CanonicalName(
+				domainName + cfg.Indexer.Tld,
+			)
+			if cfg.Indexer.Verify {
+				// Look for asset matching domain origin and TLD policy ID
+				if txOutput.Assets() == nil {
+					logger.Warnf(
+						"ignoring datum for domain %q with no matching asset",
+						domainName,
+					)
+					continue
+				}
+				foundAsset := false
+				for _, policyId := range txOutput.Assets().Policies() {
+					for _, assetName := range txOutput.Assets().Assets(policyId) {
+						if policyId.String() == cfg.Indexer.PolicyId {
+							if string(assetName) == string(origin) {
+								foundAsset = true
+							} else {
+								logger.Warnf(
+									"ignoring datum for domain %q with no matching asset",
+									domainName,
+								)
+							}
+						} else {
+							logger.Warnf(
+								"ignoring datum for domain %q with no matching asset",
+								domainName,
+							)
+						}
+					}
+				}
+				if !foundAsset {
+					continue
+				}
+				// Make sure all records are for specified origin domain
+				badRecordName := false
+				for _, record := range dnsDomain.Records {
+					recordName := dns.CanonicalName(
+						string(record.Lhs),
+					)
+					if !strings.HasSuffix(recordName, domainName) {
+						logger.Warnf(
+							"ignoring datum with record %q outside of origin domain (%s)",
+							recordName,
+							domainName,
+						)
+						badRecordName = true
+						break
+					}
+				}
+				if badRecordName {
+					continue
+				}
+			}
 			nameServers := map[string]string{}
 			for _, record := range dnsDomain.Records {
+				recordName := strings.Trim(
+					string(record.Lhs),
+					`.`,
+				)
 				// NOTE: we're losing information here, but we need to revamp the storage
 				// format before we can use it. We're also making the assumption that all
 				// records are for nameservers
 				switch strings.ToUpper(string(record.Type)) {
 				case "A", "AAAA":
-					nameServers[string(record.Lhs)] = string(record.Rhs)
+					nameServers[recordName] = string(record.Rhs)
 				default:
 					continue
 				}
