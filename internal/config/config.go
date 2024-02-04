@@ -14,24 +14,6 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-// Per-network script address for Handshake
-var networkScriptAddresses = map[string]string{
-	"preprod": "addr_test1wpf6lxntd3dztphew0m5dagrs7ptjcg9g6vgjyazt7mw44gdnwq0h",
-}
-
-// Per-network intercept points for starting the chain-sync
-// We start the sync somewhere near where we expect the first data to appear to save time
-// during the initial sync
-var networkInterceptPoints = map[string]struct {
-	Hash string
-	Slot uint64
-}{
-	"preprod": {
-		Hash: "a35a0d216e00c64c257e41089138f4d22be721281d73f2ab8ef61ca8863d04a0",
-		Slot: 34255089,
-	},
-}
-
 type Config struct {
 	Logging LoggingConfig `yaml:"logging"`
 	Metrics MetricsConfig `yaml:"metrics"`
@@ -39,6 +21,7 @@ type Config struct {
 	Debug   DebugConfig   `yaml:"debug"`
 	Indexer IndexerConfig `yaml:"indexer"`
 	State   StateConfig   `yaml:"state"`
+	Profile string        `yaml:"profile" envconfig:"PROFILE"`
 }
 
 type LoggingConfig struct {
@@ -72,6 +55,9 @@ type IndexerConfig struct {
 	ScriptAddress string `yaml:"scriptAddress" envconfig:"INDEXER_SCRIPT_ADDRESS"`
 	InterceptHash string `yaml:"interceptHash" envconfig:"INDEXER_INTERCEPT_HASH"`
 	InterceptSlot uint64 `yaml:"interceptSlot" envconfig:"INDEXER_INTERCEPT_SLOT"`
+	Tld           string `yaml:"tld" envconfig:"INDEXER_TLD"`
+	PolicyId      string `yaml:"policyId" envconfig:"INDEXER_POLICY_ID"`
+	Verify        bool   `yaml:"verify" envconfig:"INDEXER_VERIFY"`
 }
 
 type StateConfig struct {
@@ -105,10 +91,12 @@ var globalConfig = &Config{
 	},
 	Indexer: IndexerConfig{
 		Network: "preprod",
+		Verify:  true,
 	},
 	State: StateConfig{
 		Directory: "./.state",
 	},
+	Profile: "cardano-preprod-testing",
 }
 
 func Load(configFile string) (*Config, error) {
@@ -130,19 +118,41 @@ func Load(configFile string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error processing environment: %s", err)
 	}
-	// Provide default script address for named network
-	if globalConfig.Indexer.ScriptAddress == "" {
-		if scriptAddress, ok := networkScriptAddresses[globalConfig.Indexer.Network]; ok {
-			globalConfig.Indexer.ScriptAddress = scriptAddress
+	// Check profile
+	profile, ok := Profiles[globalConfig.Profile]
+	if !ok {
+		return nil, fmt.Errorf("unknown profile: %s", globalConfig.Profile)
+	}
+	// Provide default network
+	if globalConfig.Indexer.Network != "" {
+		if profile.Network != "" {
+			globalConfig.Indexer.Network = profile.Network
 		} else {
-			return nil, fmt.Errorf("no built-in script address for specified network, please provide one")
+			return nil, fmt.Errorf("no built-in network name for specified profile, please provide one")
 		}
 	}
-	// Provide default intercept point for named network
+	// Provide default script address from profile
+	if globalConfig.Indexer.ScriptAddress == "" {
+		if profile.ScriptAddress != "" {
+			globalConfig.Indexer.ScriptAddress = profile.ScriptAddress
+		} else {
+			return nil, fmt.Errorf("no built-in script address for specified profile, please provide one")
+		}
+	}
+	// Provide default intercept point from profile
 	if globalConfig.Indexer.InterceptSlot == 0 || globalConfig.Indexer.InterceptHash == "" {
-		if interceptPoint, ok := networkInterceptPoints[globalConfig.Indexer.Network]; ok {
-			globalConfig.Indexer.InterceptHash = interceptPoint.Hash
-			globalConfig.Indexer.InterceptSlot = interceptPoint.Slot
+		if profile.InterceptHash != "" && profile.InterceptSlot > 0 {
+			globalConfig.Indexer.InterceptHash = profile.InterceptHash
+			globalConfig.Indexer.InterceptSlot = profile.InterceptSlot
+		}
+	}
+	// Provide default TLD and Policy ID from profile
+	if globalConfig.Indexer.Tld == "" || globalConfig.Indexer.PolicyId == "" {
+		if profile.Tld != "" && profile.PolicyId != "" {
+			globalConfig.Indexer.Tld = profile.Tld
+			globalConfig.Indexer.PolicyId = profile.PolicyId
+		} else {
+			return nil, fmt.Errorf("no built-in TLD and/or policy ID for specified profile, please provide one")
 		}
 	}
 	return globalConfig, nil
