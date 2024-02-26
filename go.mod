@@ -9,7 +9,7 @@ require (
 	github.com/dgraph-io/badger/v4 v4.2.0
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/miekg/dns v1.1.58
-	go.uber.org/zap v1.26.0
+	go.uber.org/zap v1.27.0
 	gopkg.in/yaml.v2 v2.4.0
 )
 
