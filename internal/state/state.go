@@ -126,8 +126,27 @@ func (s *State) UpdateDomain(
 	domainName string,
 	nameServers map[string]string,
 ) error {
+	logger := logging.GetLogger()
 	err := s.db.Update(func(txn *badger.Txn) error {
-		// TODO: find any existing keys for domain and delete
+		// Delete old records for domain
+		keyPrefix := []byte(fmt.Sprintf("domain_%s_", domainName))
+		it := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer it.Close()
+		for it.Seek(keyPrefix); it.ValidForPrefix(keyPrefix); it.Next() {
+			item := it.Item()
+			k := item.Key()
+			if err := txn.Delete(k); err != nil {
+				return err
+			}
+			logger.Debug(
+				fmt.Sprintf(
+					"deleted record for domain %s with key: %s",
+					domainName,
+					k,
+				),
+			)
+		}
+		// Add new records
 		for nameServer, ipAddress := range nameServers {
 			key := fmt.Sprintf(
 				"domain_%s_nameserver_%s",
@@ -137,6 +156,14 @@ func (s *State) UpdateDomain(
 			if err := txn.Set([]byte(key), []byte(ipAddress)); err != nil {
 				return err
 			}
+			logger.Debug(
+				fmt.Sprintf(
+					"added record for domain %s: %s: %s",
+					domainName,
+					nameServer,
+					ipAddress,
+				),
+			)
 		}
 		return nil
 	})
