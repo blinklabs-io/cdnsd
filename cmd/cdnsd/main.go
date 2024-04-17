@@ -13,6 +13,8 @@ import (
 	_ "net/http/pprof"
 	"os"
 
+	_ "go.uber.org/automaxprocs"
+
 	"github.com/blinklabs-io/cdnsd/internal/config"
 	"github.com/blinklabs-io/cdnsd/internal/dns"
 	"github.com/blinklabs-io/cdnsd/internal/indexer"
