@@ -3,7 +3,7 @@ module github.com/blinklabs-io/cdnsd
 go 1.21
 
 require (
-	github.com/blinklabs-io/cardano-models v0.3.1
+	github.com/blinklabs-io/cardano-models v0.3.2
 	github.com/blinklabs-io/gouroboros v0.80.0
 	github.com/blinklabs-io/snek v0.17.4
 	github.com/dgraph-io/badger/v4 v4.2.0
