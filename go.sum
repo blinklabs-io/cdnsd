@@ -1,7 +1,7 @@
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
-github.com/blinklabs-io/cardano-models v0.3.1 h1:CtojPKiiOnd8o3NCsPZM3HYkyQ9mSVqKUz7gFKTVfZU=
-github.com/blinklabs-io/cardano-models v0.3.1/go.mod h1:Z2t4gGSyLGXMRS+BkhED4AUGDIh5rI8NTNInZYBT7eg=
+github.com/blinklabs-io/cardano-models v0.3.2 h1:3kH0sy/HhL0U2Go9yrlAlDzoT9BhjKExxzWFmoWUAxQ=
+github.com/blinklabs-io/cardano-models v0.3.2/go.mod h1:SV1SDNjwJ+Oq3qu7uGgEXeRnE+fNWgKBgSBY80gfIJI=
 github.com/blinklabs-io/gouroboros v0.80.0 h1:0XWo0+yjzOPXAR2YTE7De0gkuQvdKonP7VnQ6lNlVyA=
 github.com/blinklabs-io/gouroboros v0.80.0/go.mod h1:NeIpkG7GJOa/BW10596tysY8K3gcHt2BSnCss3fNMXU=
 github.com/blinklabs-io/ouroboros-mock v0.3.0 h1:6VRWyhAv0k7nQEgzFpuqhS/n8OM+OAaLN/sCT5K2Hbc=
