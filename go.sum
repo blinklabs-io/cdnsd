@@ -6,8 +6,8 @@ github.com/blinklabs-io/gouroboros v0.80.0 h1:0XWo0+yjzOPXAR2YTE7De0gkuQvdKonP7V
 github.com/blinklabs-io/gouroboros v0.80.0/go.mod h1:NeIpkG7GJOa/BW10596tysY8K3gcHt2BSnCss3fNMXU=
 github.com/blinklabs-io/ouroboros-mock v0.3.0 h1:6VRWyhAv0k7nQEgzFpuqhS/n8OM+OAaLN/sCT5K2Hbc=
 github.com/blinklabs-io/ouroboros-mock v0.3.0/go.mod h1:0dzTNEk/Kvqa7qYHDy7/Nn3OTt+EOosMknB37FRzI1k=
-github.com/blinklabs-io/snek v0.17.4 h1:/BoWqfJTZXSQsRkVRS3tLFhlrvjme82Xu6jYkEBtMJ4=
-github.com/blinklabs-io/snek v0.17.4/go.mod h1:EeH+8u94Jekws0WnDAKY4SeHD0ftp/t1UixLcu9qSts=
+github.com/blinklabs-io/snek v0.18.0 h1:uiitNw03EWCBaGGknZ3EQ3RDEvHcwF67t+DgBWCmdJw=
+github.com/blinklabs-io/snek v0.18.0/go.mod h1:71WM+abhoErwwFsjdLUwQ9BfVva5u5RKzu3vJWhUA9w=
 github.com/cespare/xxhash/v2 v2.1.1/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
 github.com/cespare/xxhash/v2 v2.2.0 h1:DC2CZ1Ep5Y4k3ZQ899DldepgrayRUGE6BBZ/cd9Cj44=
 github.com/cespare/xxhash/v2 v2.2.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
