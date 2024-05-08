@@ -55,9 +55,9 @@ type IndexerConfig struct {
 	ScriptAddress string `yaml:"scriptAddress" envconfig:"INDEXER_SCRIPT_ADDRESS"`
 	InterceptHash string `yaml:"interceptHash" envconfig:"INDEXER_INTERCEPT_HASH"`
 	InterceptSlot uint64 `yaml:"interceptSlot" envconfig:"INDEXER_INTERCEPT_SLOT"`
-	Tld           string `yaml:"tld" envconfig:"INDEXER_TLD"`
-	PolicyId      string `yaml:"policyId" envconfig:"INDEXER_POLICY_ID"`
-	Verify        bool   `yaml:"verify" envconfig:"INDEXER_VERIFY"`
+	Tld           string `yaml:"tld"           envconfig:"INDEXER_TLD"`
+	PolicyId      string `yaml:"policyId"      envconfig:"INDEXER_POLICY_ID"`
+	Verify        bool   `yaml:"verify"        envconfig:"INDEXER_VERIFY"`
 }
 
 type StateConfig struct {
@@ -140,7 +140,8 @@ func Load(configFile string) (*Config, error) {
 		}
 	}
 	// Provide default intercept point from profile
-	if globalConfig.Indexer.InterceptSlot == 0 || globalConfig.Indexer.InterceptHash == "" {
+	if globalConfig.Indexer.InterceptSlot == 0 ||
+		globalConfig.Indexer.InterceptHash == "" {
 		if profile.InterceptHash != "" && profile.InterceptSlot > 0 {
 			globalConfig.Indexer.InterceptHash = profile.InterceptHash
 			globalConfig.Indexer.InterceptSlot = profile.InterceptSlot
