@@ -7,9 +7,11 @@
 package state
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/blinklabs-io/cdnsd/internal/config"
 	"github.com/blinklabs-io/cdnsd/internal/logging"
@@ -22,7 +24,8 @@ const (
 )
 
 type State struct {
-	db *badger.DB
+	db      *badger.DB
+	gcTimer *time.Ticker
 }
 
 var globalState = &State{}
@@ -34,15 +37,36 @@ func (s *State) Load() error {
 		// The default INFO logging is a bit verbose
 		WithLoggingLevel(badger.WARNING)
 	db, err := badger.Open(badgerOpts)
-	// TODO: setup automatic GC for Badger
 	if err != nil {
 		return err
 	}
 	s.db = db
-	//defer db.Close()
+	// Make sure existing DB matches current config options
 	if err := s.compareFingerprint(); err != nil {
 		return err
 	}
+	// Run GC periodically for Badger DB
+	s.gcTimer = time.NewTicker(5 * time.Minute)
+	go func() {
+		logger := logging.GetLogger()
+		for range s.gcTimer.C {
+		again:
+			logger.Debug("database: running GC")
+			err := s.db.RunValueLogGC(0.5)
+			if err != nil {
+				// Log any actual errors
+				if !errors.Is(err, badger.ErrNoRewrite) {
+					logger.Warnf(
+						"database: GC failure: %s",
+						err,
+					)
+				}
+			} else {
+				// Run it again if it just ran successfully
+				goto again
+			}
+		}
+	}()
 	return nil
 }
 
