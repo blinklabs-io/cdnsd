@@ -1,4 +1,4 @@
-// Copyright 2023 Blink Labs Software
+// Copyright 2024 Blink Labs Software
 //
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file or at
@@ -234,23 +234,20 @@ func (i *Indexer) handleEvent(evt event.Event) error {
 					continue
 				}
 			}
-			nameServers := map[string]string{}
+			// Convert domain records into our storage format
+			tmpRecords := []state.DomainRecord{}
 			for _, record := range dnsDomain.Records {
-				recordName := strings.Trim(
-					string(record.Lhs),
-					`.`,
-				)
-				// NOTE: we're losing information here, but we need to revamp the storage
-				// format before we can use it. We're also making the assumption that all
-				// records are for nameservers
-				switch strings.ToUpper(string(record.Type)) {
-				case "A", "AAAA":
-					nameServers[recordName] = string(record.Rhs)
-				default:
-					continue
+				tmpRecord := state.DomainRecord{
+					Lhs:  string(record.Lhs),
+					Type: string(record.Type),
+					Rhs:  string(record.Rhs),
 				}
+				if record.Ttl.HasValue() {
+					tmpRecord.Ttl = int(record.Ttl.Value)
+				}
+				tmpRecords = append(tmpRecords, tmpRecord)
 			}
-			if err := state.GetState().UpdateDomain(domainName, nameServers); err != nil {
+			if err := state.GetState().UpdateDomain(domainName, tmpRecords); err != nil {
 				return err
 			}
 			logger.Infof(

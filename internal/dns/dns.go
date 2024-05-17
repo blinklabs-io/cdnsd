@@ -1,4 +1,4 @@
-// Copyright 2023 Blink Labs Software
+// Copyright 2024 Blink Labs Software
 //
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file or at
@@ -294,15 +294,21 @@ func findNameserversForDomain(
 		lookupDomainName := strings.Join(queryLabels[startLabelIdx:], ".")
 		// Convert to canonical form for consistency
 		lookupDomainName = dns.CanonicalName(lookupDomainName)
-		nameservers, err := state.GetState().LookupDomain(lookupDomainName)
+		nsRecords, err := state.GetState().LookupRecords([]string{"NS"}, lookupDomainName)
 		if err != nil {
 			return "", nil, err
 		}
-		if nameservers != nil {
+		if len(nsRecords) > 0 {
 			ret := map[string][]net.IP{}
-			for k, v := range nameservers {
-				k = dns.Fqdn(k)
-				ret[k] = append(ret[k], net.ParseIP(v))
+			for _, nsRecord := range nsRecords {
+				// Get matching A/AAAA records for NS entry
+				aRecords, err := state.GetState().LookupRecords([]string{"A", "AAAA"}, nsRecord.Rhs)
+				if err != nil {
+					return "", nil, err
+				}
+				for _, aRecord := range aRecords {
+					ret[nsRecord.Rhs] = append(ret[nsRecord.Rhs], net.ParseIP(aRecord.Rhs))
+				}
 			}
 			return dns.Fqdn(lookupDomainName), ret, nil
 		}

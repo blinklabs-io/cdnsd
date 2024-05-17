@@ -1,4 +1,4 @@
-// Copyright 2023 Blink Labs Software
+// Copyright 2024 Blink Labs Software
 //
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file or at
@@ -7,8 +7,11 @@
 package state
 
 import (
+	"bytes"
+	"encoding/gob"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -26,6 +29,13 @@ const (
 type State struct {
 	db      *badger.DB
 	gcTimer *time.Ticker
+}
+
+type DomainRecord struct {
+	Lhs  string
+	Type string
+	Ttl  int
+	Rhs  string
 }
 
 var globalState = &State{}
@@ -151,69 +161,91 @@ func (s *State) GetCursor() (uint64, string, error) {
 
 func (s *State) UpdateDomain(
 	domainName string,
-	nameServers map[string]string,
+	records []DomainRecord,
 ) error {
 	logger := logging.GetLogger()
 	err := s.db.Update(func(txn *badger.Txn) error {
-		// Delete old records for domain
-		keyPrefix := []byte(fmt.Sprintf("domain_%s_", domainName))
-		it := txn.NewIterator(badger.DefaultIteratorOptions)
-		defer it.Close()
-		for it.Seek(keyPrefix); it.ValidForPrefix(keyPrefix); it.Next() {
-			item := it.Item()
-			k := item.Key()
-			if err := txn.Delete(k); err != nil {
+		// Add new records
+		recordKeys := make([]string, 0)
+		for recordIdx, record := range records {
+			key := fmt.Sprintf(
+				"r_%s_%s_%d",
+				strings.ToUpper(record.Type),
+				strings.Trim(record.Lhs, `.`),
+				recordIdx,
+			)
+			recordKeys = append(recordKeys, key)
+			var gobBuf bytes.Buffer
+			gobEnc := gob.NewEncoder(&gobBuf)
+			if err := gobEnc.Encode(&record); err != nil {
+				return err
+			}
+			recordVal := gobBuf.Bytes()[:]
+			if err := txn.Set([]byte(key), recordVal); err != nil {
 				return err
 			}
 			logger.Debug(
 				fmt.Sprintf(
-					"deleted record for domain %s with key: %s",
+					"added record for domain %s: %s: %s: %s",
 					domainName,
-					k,
+					record.Type,
+					record.Lhs,
+					record.Rhs,
 				),
 			)
 		}
-		// Add new records
-		for nameServer, ipAddress := range nameServers {
-			key := fmt.Sprintf(
-				"domain_%s_nameserver_%s",
-				domainName,
-				nameServer,
-			)
-			if err := txn.Set([]byte(key), []byte(ipAddress)); err != nil {
+		// Delete old records in tracking key that are no longer present after this update
+		domainRecordsKey := []byte(fmt.Sprintf("d_%s_records", domainName))
+		domainRecordsItem, err := txn.Get(domainRecordsKey)
+		if err != nil {
+			if !errors.Is(err, badger.ErrKeyNotFound) {
 				return err
 			}
-			logger.Debug(
-				fmt.Sprintf(
-					"added record for domain %s: %s: %s",
-					domainName,
-					nameServer,
-					ipAddress,
-				),
-			)
+		} else {
+			domainRecordsVal, err := domainRecordsItem.ValueCopy(nil)
+			if err != nil {
+				return err
+			}
+			domainRecordsSplit := strings.Split(string(domainRecordsVal), ",")
+			for _, tmpRecordKey := range domainRecordsSplit {
+				if !slices.Contains(recordKeys, tmpRecordKey) {
+					if err := txn.Delete([]byte(tmpRecordKey)); err != nil {
+						return err
+					}
+				}
+			}
+		}
+		// Update tracking key with new record keys
+		recordKeysJoin := strings.Join(recordKeys, ",")
+		if err := txn.Set(domainRecordsKey, []byte(recordKeysJoin)); err != nil {
+			return err
 		}
 		return nil
 	})
 	return err
 }
 
-func (s *State) LookupDomain(domainName string) (map[string]string, error) {
-	ret := map[string]string{}
-	keyPrefix := []byte(fmt.Sprintf("domain_%s_nameserver_", domainName))
+func (s *State) LookupRecords(recordTypes []string, recordName string) ([]DomainRecord, error) {
+	ret := []DomainRecord{}
+	recordName = strings.Trim(recordName, `.`)
 	err := s.db.View(func(txn *badger.Txn) error {
-		it := txn.NewIterator(badger.DefaultIteratorOptions)
-		defer it.Close()
-		for it.Seek(keyPrefix); it.ValidForPrefix(keyPrefix); it.Next() {
-			item := it.Item()
-			k := item.Key()
-			keyParts := strings.Split(string(k), "_")
-			nameServer := keyParts[len(keyParts)-1]
-			err := item.Value(func(v []byte) error {
-				ret[nameServer] = string(v)
-				return nil
-			})
-			if err != nil {
-				return err
+		for _, recordType := range recordTypes {
+			keyPrefix := []byte(fmt.Sprintf("r_%s_%s_", strings.ToUpper(recordType), recordName))
+			it := txn.NewIterator(badger.DefaultIteratorOptions)
+			defer it.Close()
+			for it.Seek(keyPrefix); it.ValidForPrefix(keyPrefix); it.Next() {
+				item := it.Item()
+				val, err := item.ValueCopy(nil)
+				if err != nil {
+					return err
+				}
+				gobBuf := bytes.NewReader(val)
+				gobDec := gob.NewDecoder(gobBuf)
+				var tmpRecord DomainRecord
+				if err := gobDec.Decode(&tmpRecord); err != nil {
+					return err
+				}
+				ret = append(ret, tmpRecord)
 			}
 		}
 		return nil
