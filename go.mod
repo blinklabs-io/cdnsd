@@ -5,7 +5,7 @@ go 1.21
 require (
 	github.com/blinklabs-io/adder v0.22.0
 	github.com/blinklabs-io/cardano-models v0.3.3
-	github.com/blinklabs-io/gouroboros v0.86.0
+	github.com/blinklabs-io/gouroboros v0.87.0
 	github.com/dgraph-io/badger/v4 v4.2.0
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/miekg/dns v1.1.59
@@ -41,12 +41,12 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	go.opencensus.io v0.22.5 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
-	golang.org/x/crypto v0.23.0 // indirect
-	golang.org/x/mod v0.16.0 // indirect
+	golang.org/x/crypto v0.24.0 // indirect
+	golang.org/x/mod v0.17.0 // indirect
 	golang.org/x/net v0.25.0 // indirect
 	golang.org/x/sync v0.7.0 // indirect
-	golang.org/x/sys v0.20.0 // indirect
-	golang.org/x/text v0.15.0 // indirect
-	golang.org/x/tools v0.19.0 // indirect
+	golang.org/x/sys v0.21.0 // indirect
+	golang.org/x/text v0.16.0 // indirect
+	golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d // indirect
 	google.golang.org/protobuf v1.34.1 // indirect
 )
