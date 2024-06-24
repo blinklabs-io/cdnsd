@@ -4,8 +4,8 @@ go 1.21
 
 require (
 	github.com/blinklabs-io/adder v0.22.1
-	github.com/blinklabs-io/cardano-models v0.3.3
-	github.com/blinklabs-io/gouroboros v0.88.0
+	github.com/blinklabs-io/cardano-models v0.3.4
+	github.com/blinklabs-io/gouroboros v0.89.0
 	github.com/dgraph-io/badger/v4 v4.2.0
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/miekg/dns v1.1.61
@@ -24,7 +24,7 @@ require (
 	github.com/gabriel-vasile/mimetype v1.4.3 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
-	github.com/go-playground/validator/v10 v10.20.0 // indirect
+	github.com/go-playground/validator/v10 v10.22.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/glog v1.2.0 // indirect
 	github.com/golang/groupcache v0.0.0-20190702054246-869f871628b6 // indirect
