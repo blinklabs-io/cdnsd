@@ -96,7 +96,7 @@ var globalConfig = &Config{
 	State: StateConfig{
 		Directory: "./.state",
 	},
-	Profile: "cardano-preprod-testing",
+	Profile: "ada-preprod",
 }
 
 func Load(configFile string) (*Config, error) {
