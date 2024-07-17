@@ -26,4 +26,13 @@ var Profiles = map[string]Profile{
 		InterceptSlot: 50844079,
 		InterceptHash: "81325118471fddb00a20327572b371aee7cce13b846a18500d011b9cefd2a34c",
 	},
+	"ada-preprod": Profile{
+		Network:       "preprod",
+		Tld:           "ada",
+		PolicyId:      "32c89cdb9c73b904ae0fd230770ee082d6e5fe090b20eaa08ee70dd3",
+		ScriptAddress: "addr_test1xzqg5fr7v4ee3p2xehpnm44ad5hu485jnsn4f78566evl7qrdufu8hy0xgpxma2wyt4mtcwgt0td0rtx5ku0vxll3yns632tph",
+		// The intercept slot/hash correspond to the block before the first TX on the above address
+		InterceptSlot: 65308876,
+		InterceptHash: "435703531e57bfe9b4d309e7360efc43e04d06531c9393530c57bebf029ec634",
+	},
 }

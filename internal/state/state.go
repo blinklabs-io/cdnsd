@@ -208,6 +208,9 @@ func (s *State) UpdateDomain(
 			}
 			domainRecordsSplit := strings.Split(string(domainRecordsVal), ",")
 			for _, tmpRecordKey := range domainRecordsSplit {
+				if tmpRecordKey == "" {
+					continue
+				}
 				if !slices.Contains(recordKeys, tmpRecordKey) {
 					if err := txn.Delete([]byte(tmpRecordKey)); err != nil {
 						return err
