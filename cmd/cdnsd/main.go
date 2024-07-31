@@ -1,4 +1,4 @@
-// Copyright 2023 Blink Labs Software
+// Copyright 2024 Blink Labs Software
 //
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file or at
@@ -20,6 +20,7 @@ import (
 	"github.com/blinklabs-io/cdnsd/internal/indexer"
 	"github.com/blinklabs-io/cdnsd/internal/logging"
 	"github.com/blinklabs-io/cdnsd/internal/state"
+	"github.com/blinklabs-io/cdnsd/internal/version"
 )
 
 var cmdlineFlags struct {
@@ -53,6 +54,10 @@ func main() {
 			return
 		}
 	}()
+
+	logger.Info(
+		fmt.Sprintf("cdnsd %s started", version.GetVersionString()),
+	)
 
 	// Load state
 	if err := state.GetState().Load(); err != nil {
