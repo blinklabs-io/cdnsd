@@ -9,19 +9,20 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/kelseyhightower/envconfig"
 	"gopkg.in/yaml.v2"
 )
 
 type Config struct {
-	Logging LoggingConfig `yaml:"logging"`
-	Metrics MetricsConfig `yaml:"metrics"`
-	Dns     DnsConfig     `yaml:"dns"`
-	Debug   DebugConfig   `yaml:"debug"`
-	Indexer IndexerConfig `yaml:"indexer"`
-	State   StateConfig   `yaml:"state"`
-	Profile string        `yaml:"profile" envconfig:"PROFILE"`
+	Logging  LoggingConfig `yaml:"logging"`
+	Metrics  MetricsConfig `yaml:"metrics"`
+	Dns      DnsConfig     `yaml:"dns"`
+	Debug    DebugConfig   `yaml:"debug"`
+	Indexer  IndexerConfig `yaml:"indexer"`
+	State    StateConfig   `yaml:"state"`
+	Profiles []string      `yaml:"profiles" envconfig:"PROFILES"`
 }
 
 type LoggingConfig struct {
@@ -52,11 +53,8 @@ type IndexerConfig struct {
 	NetworkMagic  uint32 `yaml:"networkMagic"  envconfig:"INDEXER_NETWORK_MAGIC"`
 	Address       string `yaml:"address"       envconfig:"INDEXER_TCP_ADDRESS"`
 	SocketPath    string `yaml:"socketPath"    envconfig:"INDEXER_SOCKET_PATH"`
-	ScriptAddress string `yaml:"scriptAddress" envconfig:"INDEXER_SCRIPT_ADDRESS"`
 	InterceptHash string `yaml:"interceptHash" envconfig:"INDEXER_INTERCEPT_HASH"`
 	InterceptSlot uint64 `yaml:"interceptSlot" envconfig:"INDEXER_INTERCEPT_SLOT"`
-	Tld           string `yaml:"tld"           envconfig:"INDEXER_TLD"`
-	PolicyId      string `yaml:"policyId"      envconfig:"INDEXER_POLICY_ID"`
 	Verify        bool   `yaml:"verify"        envconfig:"INDEXER_VERIFY"`
 }
 
@@ -90,13 +88,14 @@ var globalConfig = &Config{
 		ListenPort:    8081,
 	},
 	Indexer: IndexerConfig{
-		Network: "preprod",
-		Verify:  true,
+		Verify: true,
 	},
 	State: StateConfig{
 		Directory: "./.state",
 	},
-	Profile: "ada-preprod",
+	Profiles: []string{
+		"ada-preprod",
+	},
 }
 
 func Load(configFile string) (*Config, error) {
@@ -118,42 +117,44 @@ func Load(configFile string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error processing environment: %s", err)
 	}
-	// Check profile
-	profile, ok := Profiles[globalConfig.Profile]
-	if !ok {
-		return nil, fmt.Errorf("unknown profile: %s", globalConfig.Profile)
-	}
-	// Provide default network
-	if globalConfig.Indexer.Network != "" {
-		if profile.Network != "" {
-			globalConfig.Indexer.Network = profile.Network
-		} else {
-			return nil, fmt.Errorf("no built-in network name for specified profile, please provide one")
+	// Check profiles
+	availableProfiles := GetAvailableProfiles()
+	var interceptSlot uint64
+	var interceptHash string
+	for _, profile := range globalConfig.Profiles {
+		foundProfile := false
+		for _, availableProfile := range availableProfiles {
+			if profile == availableProfile {
+				profileData := Profiles[profile]
+				// Provide default network
+				if profileData.Network != "" {
+					if globalConfig.Indexer.Network == "" {
+						globalConfig.Indexer.Network = profileData.Network
+					} else {
+						if globalConfig.Indexer.Network != profileData.Network {
+							return nil, fmt.Errorf("conflicting networks configured: %s and %s", globalConfig.Indexer.Network, profileData.Network)
+						}
+					}
+				}
+				// Update intercept slot/hash if earlier than any other profiles so far
+				if interceptSlot == 0 || profileData.InterceptSlot < interceptSlot {
+					interceptSlot = profileData.InterceptSlot
+					interceptHash = profileData.InterceptHash
+				}
+				foundProfile = true
+				break
+			}
+		}
+		if !foundProfile {
+			return nil, fmt.Errorf("unknown profile: %s: available profiles: %s", profile, strings.Join(availableProfiles, ","))
 		}
 	}
-	// Provide default script address from profile
-	if globalConfig.Indexer.ScriptAddress == "" {
-		if profile.ScriptAddress != "" {
-			globalConfig.Indexer.ScriptAddress = profile.ScriptAddress
-		} else {
-			return nil, fmt.Errorf("no built-in script address for specified profile, please provide one")
-		}
-	}
-	// Provide default intercept point from profile
+	// Provide default intercept point from profile(s)
 	if globalConfig.Indexer.InterceptSlot == 0 ||
 		globalConfig.Indexer.InterceptHash == "" {
-		if profile.InterceptHash != "" && profile.InterceptSlot > 0 {
-			globalConfig.Indexer.InterceptHash = profile.InterceptHash
-			globalConfig.Indexer.InterceptSlot = profile.InterceptSlot
-		}
-	}
-	// Provide default TLD and Policy ID from profile
-	if globalConfig.Indexer.Tld == "" || globalConfig.Indexer.PolicyId == "" {
-		if profile.Tld != "" && profile.PolicyId != "" {
-			globalConfig.Indexer.Tld = profile.Tld
-			globalConfig.Indexer.PolicyId = profile.PolicyId
-		} else {
-			return nil, fmt.Errorf("no built-in TLD and/or policy ID for specified profile, please provide one")
+		if interceptHash != "" && interceptSlot > 0 {
+			globalConfig.Indexer.InterceptHash = interceptHash
+			globalConfig.Indexer.InterceptSlot = interceptSlot
 		}
 	}
 	return globalConfig, nil

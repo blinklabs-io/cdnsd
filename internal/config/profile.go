@@ -15,6 +15,27 @@ type Profile struct {
 	InterceptHash string // Chain-sync initial intercept hash
 }
 
+func GetProfiles() []Profile {
+	var ret []Profile
+	for k, profile := range Profiles {
+		for _, tmpProfile := range globalConfig.Profiles {
+			if k == tmpProfile {
+				ret = append(ret, profile)
+				break
+			}
+		}
+	}
+	return ret
+}
+
+func GetAvailableProfiles() []string {
+	var ret []string
+	for k := range Profiles {
+		ret = append(ret, k)
+	}
+	return ret
+}
+
 var Profiles = map[string]Profile{
 	// This (default) profile corresponds to the values specified in:
 	// https://github.com/blinklabs-io/cardano-dns/blob/main/README.md
