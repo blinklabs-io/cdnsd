@@ -8,7 +8,9 @@ package indexer
 
 import (
 	"encoding/hex"
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/blinklabs-io/cdnsd/internal/config"
 	"github.com/blinklabs-io/cdnsd/internal/logging"
@@ -26,15 +28,21 @@ import (
 	"github.com/miekg/dns"
 )
 
+const (
+	syncStatusLogInterval = 30 * time.Second
+)
+
 type Domain struct {
 	Name        string
 	Nameservers map[string]string
 }
 
 type Indexer struct {
-	pipeline   *pipeline.Pipeline
-	domains    map[string]Domain
-	tipReached bool
+	pipeline     *pipeline.Pipeline
+	domains      map[string]Domain
+	tipReached   bool
+	syncLogTimer *time.Timer
+	syncStatus   input_chainsync.ChainSyncStatus
 }
 
 // Singleton indexer instance
@@ -51,10 +59,14 @@ func (i *Indexer) Start() error {
 	inputOpts := []input_chainsync.ChainSyncOptionFunc{
 		input_chainsync.WithStatusUpdateFunc(
 			func(status input_chainsync.ChainSyncStatus) {
+				i.syncStatus = status
 				if err := state.GetState().UpdateCursor(status.SlotNumber, status.BlockHash); err != nil {
 					logger.Errorf("failed to update cursor: %s", err)
 				}
 				if !i.tipReached && status.TipReached {
+					if i.syncLogTimer != nil {
+						i.syncLogTimer.Stop()
+					}
 					i.tipReached = true
 					logger.Infof("caught up to chain tip")
 				}
@@ -149,6 +161,8 @@ func (i *Indexer) Start() error {
 			logger.Fatalf("pipeline failed: %s\n", err)
 		}
 	}()
+	// Schedule periodic catch-up sync log messages
+	i.scheduleSyncStatusLog()
 	return nil
 }
 
@@ -257,6 +271,22 @@ func (i *Indexer) handleEvent(evt event.Event) error {
 		}
 	}
 	return nil
+}
+
+func (i *Indexer) scheduleSyncStatusLog() {
+	i.syncLogTimer = time.AfterFunc(syncStatusLogInterval, i.syncStatusLog)
+}
+
+func (i *Indexer) syncStatusLog() {
+	logging.GetLogger().Info(
+		fmt.Sprintf(
+			"catch-up sync in progress: at %d.%s (current tip slot is %d)",
+			i.syncStatus.SlotNumber,
+			i.syncStatus.BlockHash,
+			i.syncStatus.TipSlotNumber,
+		),
+	)
+	i.scheduleSyncStatusLog()
 }
 
 func (i *Indexer) LookupDomain(name string) *Domain {
