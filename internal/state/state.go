@@ -11,13 +11,13 @@ import (
 	"encoding/gob"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/blinklabs-io/cdnsd/internal/config"
-	"github.com/blinklabs-io/cdnsd/internal/logging"
 	"github.com/dgraph-io/badger/v4"
 )
 
@@ -58,17 +58,18 @@ func (s *State) Load() error {
 	// Run GC periodically for Badger DB
 	s.gcTimer = time.NewTicker(5 * time.Minute)
 	go func() {
-		logger := logging.GetLogger()
 		for range s.gcTimer.C {
 		again:
-			logger.Debug("database: running GC")
+			slog.Debug("database: running GC")
 			err := s.db.RunValueLogGC(0.5)
 			if err != nil {
 				// Log any actual errors
 				if !errors.Is(err, badger.ErrNoRewrite) {
-					logger.Warnf(
-						"database: GC failure: %s",
-						err,
+					slog.Warn(
+						fmt.Sprintf(
+							"database: GC failure: %s",
+							err,
+						),
 					)
 				}
 			} else {
@@ -163,7 +164,6 @@ func (s *State) UpdateDomain(
 	domainName string,
 	records []DomainRecord,
 ) error {
-	logger := logging.GetLogger()
 	err := s.db.Update(func(txn *badger.Txn) error {
 		// Add new records
 		recordKeys := make([]string, 0)
@@ -184,7 +184,7 @@ func (s *State) UpdateDomain(
 			if err := txn.Set([]byte(key), recordVal); err != nil {
 				return err
 			}
-			logger.Debug(
+			slog.Debug(
 				fmt.Sprintf(
 					"added record for domain %s: %s: %s: %s",
 					domainName,
@@ -267,16 +267,32 @@ func GetState() *State {
 }
 
 // BadgerLogger is a wrapper type to give our logger the expected interface
-type BadgerLogger struct {
-	*logging.Logger
-}
+type BadgerLogger struct{}
 
 func NewBadgerLogger() *BadgerLogger {
-	return &BadgerLogger{
-		Logger: logging.GetLogger(),
-	}
+	return &BadgerLogger{}
+}
+
+func (b *BadgerLogger) Infof(msg string, args ...any) {
+	slog.Info(
+		fmt.Sprintf(msg, args...),
+	)
 }
 
 func (b *BadgerLogger) Warningf(msg string, args ...any) {
-	b.Logger.Warnf(msg, args...)
+	slog.Warn(
+		fmt.Sprintf(msg, args...),
+	)
+}
+
+func (b *BadgerLogger) Debugf(msg string, args ...any) {
+	slog.Debug(
+		fmt.Sprintf(msg, args...),
+	)
+}
+
+func (b *BadgerLogger) Errorf(msg string, args ...any) {
+	slog.Error(
+		fmt.Sprintf(msg, args...),
+	)
 }
