@@ -8,12 +8,13 @@ package dns
 
 import (
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"net"
+	"os"
 	"strings"
 
 	"github.com/blinklabs-io/cdnsd/internal/config"
-	"github.com/blinklabs-io/cdnsd/internal/logging"
 	"github.com/blinklabs-io/cdnsd/internal/state"
 
 	"github.com/miekg/dns"
@@ -49,21 +50,25 @@ func Start() error {
 
 func startListener(server *dns.Server) {
 	if err := server.ListenAndServe(); err != nil {
-		logging.GetLogger().Fatalf("failed to start DNS listener: %s", err)
+		slog.Error(
+			fmt.Sprintf("failed to start DNS listener: %s", err),
+		)
+		os.Exit(1)
 	}
 }
 
 func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
-	logger := logging.GetLogger()
 	cfg := config.GetConfig()
 	m := new(dns.Msg)
 
 	if cfg.Logging.QueryLog {
 		for _, q := range r.Question {
-			logger.Infof("query: name: %s, type: %s, class: %s",
-				q.Name,
-				dns.Type(q.Qtype).String(),
-				dns.Class(q.Qclass).String(),
+			slog.Info(
+				fmt.Sprintf("query: name: %s, type: %s, class: %s",
+					q.Name,
+					dns.Type(q.Qtype).String(),
+					dns.Class(q.Qclass).String(),
+				),
 			)
 		}
 	}
@@ -74,7 +79,9 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 		strings.TrimSuffix(r.Question[0].Name, "."),
 	)
 	if err != nil {
-		logger.Errorf("failed to lookup records in state: %s", err)
+		slog.Error(
+			fmt.Sprintf("failed to lookup records in state: %s", err),
+		)
 		return
 	}
 	if records != nil {
@@ -83,14 +90,18 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 		for _, tmpRecord := range records {
 			tmpRR, err := stateRecordToDnsRR(tmpRecord)
 			if err != nil {
-				logger.Errorf("failed to convert state record to dns.RR: %s", err)
+				slog.Error(
+					fmt.Sprintf("failed to convert state record to dns.RR: %s", err),
+				)
 				return
 			}
 			m.Answer = append(m.Answer, tmpRR)
 		}
 		// Send response
 		if err := w.WriteMsg(m); err != nil {
-			logger.Errorf("failed to write response: %s", err)
+			slog.Error(
+				fmt.Sprintf("failed to write response: %s", err),
+			)
 		}
 		// We found our answer, to return from handler
 		return
@@ -101,10 +112,12 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 		r.Question[0].Name,
 	)
 	if err != nil {
-		logger.Errorf(
-			"failed to lookup nameservers for %s: %s",
-			r.Question[0].Name,
-			err,
+		slog.Error(
+			fmt.Sprintf(
+				"failed to lookup nameservers for %s: %s",
+				r.Question[0].Name,
+				err,
+			),
 		)
 	}
 	if nameservers != nil {
@@ -119,15 +132,21 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 				// Send failure response
 				m.SetRcode(r, dns.RcodeServerFailure)
 				if err := w.WriteMsg(m); err != nil {
-					logger.Errorf("failed to write response: %s", err)
+					slog.Error(
+						fmt.Sprintf("failed to write response: %s", err),
+					)
 				}
-				logger.Errorf("failed to query domain nameserver: %s", err)
+				slog.Error(
+					fmt.Sprintf("failed to query domain nameserver: %s", err),
+				)
 				return
 			} else {
 				copyResponse(r, resp, m)
 				// Send response
 				if err := w.WriteMsg(m); err != nil {
-					logger.Errorf("failed to write response: %s", err)
+					slog.Error(
+						fmt.Sprintf("failed to write response: %s", err),
+					)
 				}
 				return
 			}
@@ -161,7 +180,9 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 		}
 		// Send response
 		if err := w.WriteMsg(m); err != nil {
-			logger.Errorf("failed to write response: %s", err)
+			slog.Error(
+				fmt.Sprintf("failed to write response: %s", err),
+			)
 		}
 		// We found our answer, to return from handler
 		return
@@ -177,15 +198,21 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 			// Send failure response
 			m.SetRcode(r, dns.RcodeServerFailure)
 			if err := w.WriteMsg(m); err != nil {
-				logger.Errorf("failed to write response: %s", err)
+				slog.Error(
+					fmt.Sprintf("failed to write response: %s", err),
+				)
 			}
-			logger.Errorf("failed to query domain nameserver: %s", err)
+			slog.Error(
+				fmt.Sprintf("failed to query domain nameserver: %s", err),
+			)
 			return
 		} else {
 			copyResponse(r, resp, m)
 			// Send response
 			if err := w.WriteMsg(m); err != nil {
-				logger.Errorf("failed to write response: %s", err)
+				slog.Error(
+					fmt.Sprintf("failed to write response: %s", err),
+				)
 			}
 			return
 		}
@@ -194,7 +221,9 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 	// Return NXDOMAIN if we have no information about the requested domain or any of its parents
 	m.SetRcode(r, dns.RcodeNameError)
 	if err := w.WriteMsg(m); err != nil {
-		logger.Errorf("failed to write response: %s", err)
+		slog.Error(
+			fmt.Sprintf("failed to write response: %s", err),
+		)
 	}
 }
 
@@ -243,7 +272,6 @@ func randomNameserverAddress(nameservers map[string][]net.IP) net.IP {
 }
 
 func doQuery(msg *dns.Msg, address string, recursive bool) (*dns.Msg, error) {
-	logger := logging.GetLogger()
 	// Default to a random fallback server if no address is specified
 	if address == "" {
 		address = randomFallbackServer()
@@ -252,22 +280,26 @@ func doQuery(msg *dns.Msg, address string, recursive bool) (*dns.Msg, error) {
 	if !strings.Contains(address, ":") {
 		address = address + `:53`
 	}
-	logger.Debugf(
-		"querying %s: %s",
-		address,
-		formatMessageQuestionSection(msg.Question),
+	slog.Debug(
+		fmt.Sprintf(
+			"querying %s: %s",
+			address,
+			formatMessageQuestionSection(msg.Question),
+		),
 	)
 	resp, err := dns.Exchange(msg, address)
 	if err != nil {
 		return nil, err
 	}
-	logger.Debugf(
-		"response: rcode=%s, authoritative=%v, authority=%s, answer=%s, extra=%s",
-		dns.RcodeToString[resp.Rcode],
-		resp.Authoritative,
-		formatMessageAnswerSection(resp.Ns),
-		formatMessageAnswerSection(resp.Answer),
-		formatMessageAnswerSection(resp.Extra),
+	slog.Debug(
+		fmt.Sprintf(
+			"response: rcode=%s, authoritative=%v, authority=%s, answer=%s, extra=%s",
+			dns.RcodeToString[resp.Rcode],
+			resp.Authoritative,
+			formatMessageAnswerSection(resp.Ns),
+			formatMessageAnswerSection(resp.Answer),
+			formatMessageAnswerSection(resp.Extra),
+		),
 	)
 	// Immediately return authoritative response
 	if resp.Authoritative {

@@ -9,6 +9,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log/slog"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -18,7 +19,6 @@ import (
 	"github.com/blinklabs-io/cdnsd/internal/config"
 	"github.com/blinklabs-io/cdnsd/internal/dns"
 	"github.com/blinklabs-io/cdnsd/internal/indexer"
-	"github.com/blinklabs-io/cdnsd/internal/logging"
 	"github.com/blinklabs-io/cdnsd/internal/state"
 	"github.com/blinklabs-io/cdnsd/internal/version"
 )
@@ -43,33 +43,38 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Configure logging
-	logging.Setup()
-	logger := logging.GetLogger()
-	// Sync logger on exit
-	defer func() {
-		if err := logger.Sync(); err != nil {
-			// We don't actually care about the error here, but we have to do something
-			// to appease the linter
-			return
-		}
-	}()
+	// Configure logger
+	logLevel := slog.LevelInfo
+	if cfg.Logging.Debug {
+		logLevel = slog.LevelDebug
+	}
+	logger := slog.New(
+		slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+			Level: logLevel,
+		}),
+	)
+	slog.SetDefault(logger)
 
-	logger.Info(
+	slog.Info(
 		fmt.Sprintf("cdnsd %s started", version.GetVersionString()),
 	)
 
 	// Load state
 	if err := state.GetState().Load(); err != nil {
-		logger.Fatalf("failed to load state: %s", err)
+		slog.Error(
+			fmt.Sprintf("failed to load state: %s", err),
+		)
+		os.Exit(1)
 	}
 
 	// Start debug listener
 	if cfg.Debug.ListenPort > 0 {
-		logger.Infof(
-			"starting debug listener on %s:%d",
-			cfg.Debug.ListenAddress,
-			cfg.Debug.ListenPort,
+		slog.Info(
+			fmt.Sprintf(
+				"starting debug listener on %s:%d",
+				cfg.Debug.ListenAddress,
+				cfg.Debug.ListenPort,
+			),
 		)
 		go func() {
 			err := http.ListenAndServe(
@@ -81,24 +86,35 @@ func main() {
 				nil,
 			)
 			if err != nil {
-				logger.Fatalf("failed to start debug listener: %s", err)
+				slog.Error(
+					fmt.Sprintf("failed to start debug listener: %s", err),
+				)
+				os.Exit(1)
 			}
 		}()
 	}
 
 	// Start indexer
 	if err := indexer.GetIndexer().Start(); err != nil {
-		logger.Fatalf("failed to start indexer: %s", err)
+		slog.Error(
+			fmt.Sprintf("failed to start indexer: %s", err),
+		)
+		os.Exit(1)
 	}
 
 	// Start DNS listener
-	logger.Infof(
-		"starting DNS listener on %s:%d",
-		cfg.Dns.ListenAddress,
-		cfg.Dns.ListenPort,
+	slog.Info(
+		fmt.Sprintf(
+			"starting DNS listener on %s:%d",
+			cfg.Dns.ListenAddress,
+			cfg.Dns.ListenPort,
+		),
 	)
 	if err := dns.Start(); err != nil {
-		logger.Fatalf("failed to start DNS listener: %s", err)
+		slog.Error(
+			fmt.Sprintf("failed to start DNS listener: %s", err),
+		)
+		os.Exit(1)
 	}
 
 	// Wait forever

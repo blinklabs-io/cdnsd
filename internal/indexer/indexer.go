@@ -9,11 +9,12 @@ package indexer
 import (
 	"encoding/hex"
 	"fmt"
+	"log/slog"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/blinklabs-io/cdnsd/internal/config"
-	"github.com/blinklabs-io/cdnsd/internal/logging"
 	"github.com/blinklabs-io/cdnsd/internal/state"
 
 	"github.com/blinklabs-io/adder/event"
@@ -52,7 +53,6 @@ var globalIndexer = &Indexer{
 
 func (i *Indexer) Start() error {
 	cfg := config.GetConfig()
-	logger := logging.GetLogger()
 	// Create pipeline
 	i.pipeline = pipeline.New()
 	// Configure pipeline input
@@ -61,20 +61,22 @@ func (i *Indexer) Start() error {
 			func(status input_chainsync.ChainSyncStatus) {
 				i.syncStatus = status
 				if err := state.GetState().UpdateCursor(status.SlotNumber, status.BlockHash); err != nil {
-					logger.Errorf("failed to update cursor: %s", err)
+					slog.Error(
+						fmt.Sprintf("failed to update cursor: %s", err),
+					)
 				}
 				if !i.tipReached && status.TipReached {
 					if i.syncLogTimer != nil {
 						i.syncLogTimer.Stop()
 					}
 					i.tipReached = true
-					logger.Infof("caught up to chain tip")
+					slog.Info("caught up to chain tip")
 				}
 			},
 		),
 		input_chainsync.WithBulkMode(true),
 		input_chainsync.WithAutoReconnect(true),
-		input_chainsync.WithLogger(logger),
+		input_chainsync.WithLogger(NewAdderLogger()),
 	}
 	if cfg.Indexer.NetworkMagic > 0 {
 		inputOpts = append(
@@ -92,10 +94,12 @@ func (i *Indexer) Start() error {
 		return err
 	}
 	if cursorSlotNumber > 0 {
-		logger.Infof(
-			"found previous chainsync cursor: %d, %s",
-			cursorSlotNumber,
-			cursorBlockHash,
+		slog.Info(
+			fmt.Sprintf(
+				"found previous chainsync cursor: %d, %s",
+				cursorSlotNumber,
+				cursorBlockHash,
+			),
 		)
 		hashBytes, err := hex.DecodeString(cursorBlockHash)
 		if err != nil {
@@ -113,7 +117,9 @@ func (i *Indexer) Start() error {
 			),
 		)
 	} else if cfg.Indexer.InterceptHash != "" && cfg.Indexer.InterceptSlot > 0 {
-		logger.Infof("starting new chainsync at configured location: %d, %s", cfg.Indexer.InterceptSlot, cfg.Indexer.InterceptHash)
+		slog.Info(
+			fmt.Sprintf("starting new chainsync at configured location: %d, %s", cfg.Indexer.InterceptSlot, cfg.Indexer.InterceptHash),
+		)
 		hashBytes, err := hex.DecodeString(cfg.Indexer.InterceptHash)
 		if err != nil {
 			return err
@@ -156,13 +162,19 @@ func (i *Indexer) Start() error {
 	i.pipeline.AddOutput(output)
 	// Start pipeline
 	if err := i.pipeline.Start(); err != nil {
-		logger.Fatalf("failed to start pipeline: %s\n", err)
+		slog.Error(
+			fmt.Sprintf("failed to start pipeline: %s\n", err),
+		)
+		os.Exit(1)
 	}
 	// Start error handler
 	go func() {
 		err, ok := <-i.pipeline.ErrorChan()
 		if ok {
-			logger.Fatalf("pipeline failed: %s\n", err)
+			slog.Error(
+				fmt.Sprintf("pipeline failed: %s\n", err),
+			)
+			os.Exit(1)
 		}
 	}()
 	// Schedule periodic catch-up sync log messages
@@ -172,7 +184,6 @@ func (i *Indexer) Start() error {
 
 func (i *Indexer) handleEvent(evt event.Event) error {
 	cfg := config.GetConfig()
-	logger := logging.GetLogger()
 	eventTx := evt.Payload.(input_chainsync.TransactionEvent)
 	eventCtx := evt.Context.(input_chainsync.TransactionContext)
 	for _, txOutput := range eventTx.Outputs {
@@ -184,10 +195,12 @@ func (i *Indexer) handleEvent(evt event.Event) error {
 			if datum != nil {
 				var dnsDomain models.CardanoDnsDomain
 				if _, err := cbor.Decode(datum.Cbor(), &dnsDomain); err != nil {
-					logger.Warnf(
-						"error decoding TX (%s) output datum: %s",
-						eventCtx.TransactionHash,
-						err,
+					slog.Warn(
+						fmt.Sprintf(
+							"error decoding TX (%s) output datum: %s",
+							eventCtx.TransactionHash,
+							err,
+						),
 					)
 					// Stop processing TX output if we can't parse the datum
 					continue
@@ -207,9 +220,11 @@ func (i *Indexer) handleEvent(evt event.Event) error {
 				if cfg.Indexer.Verify {
 					// Look for asset matching domain origin and TLD policy ID
 					if txOutput.Assets() == nil {
-						logger.Warnf(
-							"ignoring datum for domain %q with no matching asset",
-							domainName,
+						slog.Warn(
+							fmt.Sprintf(
+								"ignoring datum for domain %q with no matching asset",
+								domainName,
+							),
 						)
 						continue
 					}
@@ -220,15 +235,19 @@ func (i *Indexer) handleEvent(evt event.Event) error {
 								if string(assetName) == string(origin) {
 									foundAsset = true
 								} else {
-									logger.Warnf(
-										"ignoring datum for domain %q with no matching asset",
-										domainName,
+									slog.Warn(
+										fmt.Sprintf(
+											"ignoring datum for domain %q with no matching asset",
+											domainName,
+										),
 									)
 								}
 							} else {
-								logger.Warnf(
-									"ignoring datum for domain %q with no matching asset",
-									domainName,
+								slog.Warn(
+									fmt.Sprintf(
+										"ignoring datum for domain %q with no matching asset",
+										domainName,
+									),
 								)
 							}
 						}
@@ -243,10 +262,12 @@ func (i *Indexer) handleEvent(evt event.Event) error {
 							string(record.Lhs),
 						)
 						if !strings.HasSuffix(recordName, domainName) {
-							logger.Warnf(
-								"ignoring datum with record %q outside of origin domain (%s)",
-								recordName,
-								domainName,
+							slog.Warn(
+								fmt.Sprintf(
+									"ignoring datum with record %q outside of origin domain (%s)",
+									recordName,
+									domainName,
+								),
 							)
 							badRecordName = true
 							break
@@ -272,9 +293,11 @@ func (i *Indexer) handleEvent(evt event.Event) error {
 				if err := state.GetState().UpdateDomain(domainName, tmpRecords); err != nil {
 					return err
 				}
-				logger.Infof(
-					"found updated registration for domain: %s",
-					domainName,
+				slog.Info(
+					fmt.Sprintf(
+						"found updated registration for domain: %s",
+						domainName,
+					),
 				)
 			}
 		}
@@ -287,7 +310,7 @@ func (i *Indexer) scheduleSyncStatusLog() {
 }
 
 func (i *Indexer) syncStatusLog() {
-	logging.GetLogger().Info(
+	slog.Info(
 		fmt.Sprintf(
 			"catch-up sync in progress: at %d.%s (current tip slot is %d)",
 			i.syncStatus.SlotNumber,
@@ -308,4 +331,44 @@ func (i *Indexer) LookupDomain(name string) *Domain {
 // GetIndexer returns the global indexer instance
 func GetIndexer() *Indexer {
 	return globalIndexer
+}
+
+// TODO: remove the below once we switch adder to slog
+
+// AdderLogger is a wrapper type to give our logger the expected interface
+type AdderLogger struct{}
+
+func NewAdderLogger() *AdderLogger {
+	return &AdderLogger{}
+}
+
+func (a *AdderLogger) Infof(msg string, args ...any) {
+	slog.Info(
+		fmt.Sprintf(msg, args...),
+	)
+}
+
+func (a *AdderLogger) Warnf(msg string, args ...any) {
+	slog.Warn(
+		fmt.Sprintf(msg, args...),
+	)
+}
+
+func (a *AdderLogger) Debugf(msg string, args ...any) {
+	slog.Debug(
+		fmt.Sprintf(msg, args...),
+	)
+}
+
+func (a *AdderLogger) Errorf(msg string, args ...any) {
+	slog.Error(
+		fmt.Sprintf(msg, args...),
+	)
+}
+
+func (a *AdderLogger) Fatalf(msg string, args ...any) {
+	slog.Error(
+		fmt.Sprintf(msg, args...),
+	)
+	os.Exit(1)
 }
