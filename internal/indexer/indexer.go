@@ -141,8 +141,12 @@ func (i *Indexer) Start() error {
 	)
 	i.pipeline.AddFilter(filterEvent)
 	// We only care about transactions on a certain address
+	var filterAddresses []string
+	for _, profile := range config.GetProfiles() {
+		filterAddresses = append(filterAddresses, profile.ScriptAddress)
+	}
 	filterChainsync := filter_chainsync.New(
-		filter_chainsync.WithAddresses([]string{cfg.Indexer.ScriptAddress}),
+		filter_chainsync.WithAddresses(filterAddresses),
 	)
 	i.pipeline.AddFilter(filterChainsync)
 	// Configure pipeline output
@@ -172,102 +176,107 @@ func (i *Indexer) handleEvent(evt event.Event) error {
 	eventTx := evt.Payload.(input_chainsync.TransactionEvent)
 	eventCtx := evt.Context.(input_chainsync.TransactionContext)
 	for _, txOutput := range eventTx.Outputs {
-		datum := txOutput.Datum()
-		if datum != nil {
-			var dnsDomain models.CardanoDnsDomain
-			if _, err := cbor.Decode(datum.Cbor(), &dnsDomain); err != nil {
-				logger.Warnf(
-					"error decoding TX (%s) output datum: %s",
-					eventCtx.TransactionHash,
-					err,
-				)
-				// Stop processing TX output if we can't parse the datum
+		for _, profile := range config.GetProfiles() {
+			if txOutput.Address().String() != profile.ScriptAddress {
 				continue
 			}
-			origin := string(dnsDomain.Origin)
-			// Convert origin to canonical form for consistency
-			// This mostly means adding a trailing period if it doesn't have one
-			domainName := dns.CanonicalName(origin)
-			// We want an empty value for the TLD root for convenience
-			if domainName == `.` {
-				domainName = ``
-			}
-			// Append TLD
-			domainName = dns.CanonicalName(
-				domainName + cfg.Indexer.Tld,
-			)
-			if cfg.Indexer.Verify {
-				// Look for asset matching domain origin and TLD policy ID
-				if txOutput.Assets() == nil {
+			datum := txOutput.Datum()
+			if datum != nil {
+				var dnsDomain models.CardanoDnsDomain
+				if _, err := cbor.Decode(datum.Cbor(), &dnsDomain); err != nil {
 					logger.Warnf(
-						"ignoring datum for domain %q with no matching asset",
-						domainName,
+						"error decoding TX (%s) output datum: %s",
+						eventCtx.TransactionHash,
+						err,
 					)
+					// Stop processing TX output if we can't parse the datum
 					continue
 				}
-				foundAsset := false
-				for _, policyId := range txOutput.Assets().Policies() {
-					for _, assetName := range txOutput.Assets().Assets(policyId) {
-						if policyId.String() == cfg.Indexer.PolicyId {
-							if string(assetName) == string(origin) {
-								foundAsset = true
+				origin := string(dnsDomain.Origin)
+				// Convert origin to canonical form for consistency
+				// This mostly means adding a trailing period if it doesn't have one
+				domainName := dns.CanonicalName(origin)
+				// We want an empty value for the TLD root for convenience
+				if domainName == `.` {
+					domainName = ``
+				}
+				// Append TLD
+				domainName = dns.CanonicalName(
+					domainName + profile.Tld,
+				)
+				if cfg.Indexer.Verify {
+					// Look for asset matching domain origin and TLD policy ID
+					if txOutput.Assets() == nil {
+						logger.Warnf(
+							"ignoring datum for domain %q with no matching asset",
+							domainName,
+						)
+						continue
+					}
+					foundAsset := false
+					for _, policyId := range txOutput.Assets().Policies() {
+						for _, assetName := range txOutput.Assets().Assets(policyId) {
+							if policyId.String() == profile.PolicyId {
+								if string(assetName) == string(origin) {
+									foundAsset = true
+								} else {
+									logger.Warnf(
+										"ignoring datum for domain %q with no matching asset",
+										domainName,
+									)
+								}
 							} else {
 								logger.Warnf(
 									"ignoring datum for domain %q with no matching asset",
 									domainName,
 								)
 							}
-						} else {
-							logger.Warnf(
-								"ignoring datum for domain %q with no matching asset",
-								domainName,
-							)
 						}
 					}
-				}
-				if !foundAsset {
-					continue
-				}
-				// Make sure all records are for specified origin domain
-				badRecordName := false
-				for _, record := range dnsDomain.Records {
-					recordName := dns.CanonicalName(
-						string(record.Lhs),
-					)
-					if !strings.HasSuffix(recordName, domainName) {
-						logger.Warnf(
-							"ignoring datum with record %q outside of origin domain (%s)",
-							recordName,
-							domainName,
+					if !foundAsset {
+						continue
+					}
+					// Make sure all records are for specified origin domain
+					badRecordName := false
+					for _, record := range dnsDomain.Records {
+						recordName := dns.CanonicalName(
+							string(record.Lhs),
 						)
-						badRecordName = true
-						break
+						if !strings.HasSuffix(recordName, domainName) {
+							logger.Warnf(
+								"ignoring datum with record %q outside of origin domain (%s)",
+								recordName,
+								domainName,
+							)
+							badRecordName = true
+							break
+						}
+					}
+					if badRecordName {
+						continue
 					}
 				}
-				if badRecordName {
-					continue
+				// Convert domain records into our storage format
+				tmpRecords := []state.DomainRecord{}
+				for _, record := range dnsDomain.Records {
+					tmpRecord := state.DomainRecord{
+						Lhs:  string(record.Lhs),
+						Type: string(record.Type),
+						Rhs:  string(record.Rhs),
+					}
+					if record.Ttl.HasValue() {
+						tmpRecord.Ttl = int(record.Ttl.Value)
+					}
+					tmpRecords = append(tmpRecords, tmpRecord)
 				}
-			}
-			// Convert domain records into our storage format
-			tmpRecords := []state.DomainRecord{}
-			for _, record := range dnsDomain.Records {
-				tmpRecord := state.DomainRecord{
-					Lhs:  string(record.Lhs),
-					Type: string(record.Type),
-					Rhs:  string(record.Rhs),
+				if err := state.GetState().UpdateDomain(domainName, tmpRecords); err != nil {
+					return err
 				}
-				if record.Ttl.HasValue() {
-					tmpRecord.Ttl = int(record.Ttl.Value)
-				}
-				tmpRecords = append(tmpRecords, tmpRecord)
+				logger.Infof(
+					"found updated registration for domain: %s",
+					domainName,
+				)
 			}
-			if err := state.GetState().UpdateDomain(domainName, tmpRecords); err != nil {
-				return err
-			}
-			logger.Infof(
-				"found updated registration for domain: %s",
-				domainName,
-			)
 		}
 	}
 	return nil
