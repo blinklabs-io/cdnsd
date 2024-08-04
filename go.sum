@@ -2,8 +2,8 @@ cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMT
 filippo.io/edwards25519 v1.1.0 h1:FNf4tywRC1HmFuKW5xopWpigGjJKiJSV0Cqo0cJWDaA=
 filippo.io/edwards25519 v1.1.0/go.mod h1:BxyFTGdWcka3PhytdK4V28tE5sGfRvvvRV7EaN4VDT4=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
-github.com/blinklabs-io/adder v0.22.1 h1:AgH73hk9t+7FOzCGcCdefxRCFwq+6NrEWcSwuytXGMA=
-github.com/blinklabs-io/adder v0.22.1/go.mod h1:UA4zIi69MNW+gCqNUqW+eobnVn0X2CK6YmTme1NCSCI=
+github.com/blinklabs-io/adder v0.22.2 h1:9qh2Aqil1DvSs0hTqlaVQjYYMSY9UqYe7Q4xKwpBeOg=
+github.com/blinklabs-io/adder v0.22.2/go.mod h1:dqVzR+fOFGestDLufzYI7N9luBaA6NLokA6a7lQlMc0=
 github.com/blinklabs-io/cardano-models v0.3.6 h1:EmupOempdGjfsvOuItaCZ8FlMiwbF1NBiztqfa3HB1I=
 github.com/blinklabs-io/cardano-models v0.3.6/go.mod h1:QVU0hGMQDlM+uPFgibGJdz2aQY98QvL2/HCoXGcWVyE=
 github.com/blinklabs-io/gouroboros v0.90.0 h1:PReNJ9JY+6nU6w/gHxRhSg52O6VcEpoDaicbN9UoiQU=
