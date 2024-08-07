@@ -18,6 +18,15 @@ import (
 	"github.com/blinklabs-io/cdnsd/internal/state"
 
 	"github.com/miekg/dns"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+)
+
+var (
+	metricQueryTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "dns_query_total",
+		Help: "total DNS queries handled",
+	})
 )
 
 func Start() error {
@@ -72,6 +81,8 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 			)
 		}
 	}
+	// Increment query total metric
+	metricQueryTotal.Inc()
 
 	// Check for known record from local storage
 	records, err := state.GetState().LookupRecords(
