@@ -13,7 +13,9 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	_ "go.uber.org/automaxprocs"
 
 	"github.com/blinklabs-io/cdnsd/internal/config"
@@ -88,6 +90,30 @@ func main() {
 			if err != nil {
 				slog.Error(
 					fmt.Sprintf("failed to start debug listener: %s", err),
+				)
+				os.Exit(1)
+			}
+		}()
+	}
+
+	// Start metrics listener
+	if cfg.Metrics.ListenPort > 0 {
+		metricsListenAddr := fmt.Sprintf("%s:%d", cfg.Metrics.ListenAddress, cfg.Metrics.ListenPort)
+		slog.Info(
+			fmt.Sprintf("starting listener for prometheus metrics connections on %s", metricsListenAddr),
+		)
+		metricsMux := http.NewServeMux()
+		metricsMux.Handle("/metrics", promhttp.Handler())
+		metricsSrv := &http.Server{
+			Addr:         metricsListenAddr,
+			WriteTimeout: 10 * time.Second,
+			ReadTimeout:  10 * time.Second,
+			Handler:      metricsMux,
+		}
+		go func() {
+			if err := metricsSrv.ListenAndServe(); err != nil {
+				slog.Error(
+					fmt.Sprintf("failed to start metrics listener: %s", err),
 				)
 				os.Exit(1)
 			}
