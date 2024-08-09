@@ -85,37 +85,45 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 	metricQueryTotal.Inc()
 
 	// Check for known record from local storage
-	records, err := state.GetState().LookupRecords(
-		[]string{dns.Type(r.Question[0].Qtype).String()},
-		strings.TrimSuffix(r.Question[0].Name, "."),
-	)
-	if err != nil {
-		slog.Error(
-			fmt.Sprintf("failed to lookup records in state: %s", err),
-		)
-		return
+	lookupRecordTypes := []uint16{r.Question[0].Qtype}
+	switch r.Question[0].Qtype {
+	case dns.TypeA, dns.TypeAAAA:
+		// If the query is for A/AAAA, also try looking up matching CNAME records
+		lookupRecordTypes = append(lookupRecordTypes, dns.TypeCNAME)
 	}
-	if records != nil {
-		// Assemble response
-		m.SetReply(r)
-		for _, tmpRecord := range records {
-			tmpRR, err := stateRecordToDnsRR(tmpRecord)
-			if err != nil {
-				slog.Error(
-					fmt.Sprintf("failed to convert state record to dns.RR: %s", err),
-				)
-				return
-			}
-			m.Answer = append(m.Answer, tmpRR)
-		}
-		// Send response
-		if err := w.WriteMsg(m); err != nil {
+	for _, lookupRecordType := range lookupRecordTypes {
+		records, err := state.GetState().LookupRecords(
+			[]string{dns.Type(lookupRecordType).String()},
+			strings.TrimSuffix(r.Question[0].Name, "."),
+		)
+		if err != nil {
 			slog.Error(
-				fmt.Sprintf("failed to write response: %s", err),
+				fmt.Sprintf("failed to lookup records in state: %s", err),
 			)
+			return
 		}
-		// We found our answer, to return from handler
-		return
+		if records != nil {
+			// Assemble response
+			m.SetReply(r)
+			for _, tmpRecord := range records {
+				tmpRR, err := stateRecordToDnsRR(tmpRecord)
+				if err != nil {
+					slog.Error(
+						fmt.Sprintf("failed to convert state record to dns.RR: %s", err),
+					)
+					return
+				}
+				m.Answer = append(m.Answer, tmpRR)
+			}
+			// Send response
+			if err := w.WriteMsg(m); err != nil {
+				slog.Error(
+					fmt.Sprintf("failed to write response: %s", err),
+				)
+			}
+			// We found our answer, to return from handler
+			return
+		}
 	}
 
 	// Check for any NS records for parent domains from local storage
