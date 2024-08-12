@@ -92,6 +92,7 @@ var globalConfig = &Config{
 	},
 	Profiles: []string{
 		"ada-preprod",
+		"hydra-preprod",
 	},
 }
 

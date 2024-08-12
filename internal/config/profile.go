@@ -56,4 +56,13 @@ var Profiles = map[string]Profile{
 		InterceptSlot: 65308876,
 		InterceptHash: "435703531e57bfe9b4d309e7360efc43e04d06531c9393530c57bebf029ec634",
 	},
+	"hydra-preprod": Profile{
+		Network:       "preprod",
+		Tld:           "hydra",
+		PolicyId:      "f5f8228a4bd56704ad3c612ecc74e5d2e5d15292b8cae3aaa8065fc1",
+		ScriptAddress: "addr_test1xq65et2tuw48genyy2hj7d84awfvah2k28enantddllq03vgc3uvcfh3r3kaa5gyk5l2vgdl8vj8cstslf4w2ajuy0wsx37n83",
+		// The intercept slot/hash correspond to the block before the first TX on the above address
+		InterceptSlot: 67799029,
+		InterceptHash: "4815dae9cd8f492ab51b109ba87d091ae85a0999af33ac459d8504122cb911f7",
+	},
 }
