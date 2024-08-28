@@ -91,8 +91,9 @@ var globalConfig = &Config{
 		Directory: "./.state",
 	},
 	Profiles: []string{
+		// NOTE: this is here because .ada wasn't added to the discovery address when it was originally deployed
 		"ada-preprod",
-		"hydra-preprod",
+		"auto-preprod",
 	},
 }
 
