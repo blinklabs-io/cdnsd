@@ -9,6 +9,7 @@ package state
 import (
 	"bytes"
 	"encoding/gob"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -23,6 +24,7 @@ import (
 
 const (
 	chainsyncCursorKey = "chainsync_cursor"
+	discoveredAddrKey  = "discovered_addresses"
 	fingerprintKey     = "config_fingerprint"
 )
 
@@ -36,6 +38,12 @@ type DomainRecord struct {
 	Type string
 	Ttl  int
 	Rhs  string
+}
+
+type DiscoveredAddress struct {
+	Address  string
+	TldName  string
+	PolicyId string
 }
 
 var globalState = &State{}
@@ -158,6 +166,51 @@ func (s *State) GetCursor() (uint64, string, error) {
 		return 0, "", nil
 	}
 	return slotNumber, blockHash, err
+}
+
+func (s *State) AddDiscoveredAddress(addr DiscoveredAddress) error {
+	tmpAddrs, err := s.GetDiscoveredAddresses()
+	if err != nil {
+		return err
+	}
+	tmpAddrs = append(tmpAddrs, addr)
+	tmpAddrsJson, err := json.Marshal(&tmpAddrs)
+	if err != nil {
+		return err
+	}
+	err = s.db.Update(func(txn *badger.Txn) error {
+		return txn.Set(
+			[]byte(discoveredAddrKey),
+			tmpAddrsJson,
+		)
+	})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *State) GetDiscoveredAddresses() ([]DiscoveredAddress, error) {
+	var ret []DiscoveredAddress
+	err := s.db.View(func(txn *badger.Txn) error {
+		item, err := txn.Get([]byte(discoveredAddrKey))
+		if err != nil {
+			return err
+		}
+		err = item.Value(func(v []byte) error {
+			return json.Unmarshal(v, &ret)
+		})
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		if err != badger.ErrKeyNotFound {
+			return ret, err
+		}
+	}
+	return ret, nil
 }
 
 func (s *State) UpdateDomain(

@@ -16,15 +16,16 @@ import (
 
 	"github.com/blinklabs-io/cdnsd/internal/config"
 	"github.com/blinklabs-io/cdnsd/internal/state"
+	ouroboros "github.com/blinklabs-io/gouroboros"
 
 	"github.com/blinklabs-io/adder/event"
-	filter_chainsync "github.com/blinklabs-io/adder/filter/chainsync"
 	filter_event "github.com/blinklabs-io/adder/filter/event"
 	input_chainsync "github.com/blinklabs-io/adder/input/chainsync"
 	output_embedded "github.com/blinklabs-io/adder/output/embedded"
 	"github.com/blinklabs-io/adder/pipeline"
 	models "github.com/blinklabs-io/cardano-models"
 	"github.com/blinklabs-io/gouroboros/cbor"
+	"github.com/blinklabs-io/gouroboros/ledger"
 	ocommon "github.com/blinklabs-io/gouroboros/protocol/common"
 	"github.com/miekg/dns"
 )
@@ -44,6 +45,14 @@ type Indexer struct {
 	tipReached   bool
 	syncLogTimer *time.Timer
 	syncStatus   input_chainsync.ChainSyncStatus
+	watched      []watchedAddr
+}
+
+type watchedAddr struct {
+	Address   string
+	Tld       string
+	PolicyId  string
+	Discovery bool
 }
 
 // Singleton indexer instance
@@ -52,7 +61,46 @@ var globalIndexer = &Indexer{
 }
 
 func (i *Indexer) Start() error {
+	// Build watched addresses from enabled profiles
 	cfg := config.GetConfig()
+	for _, profile := range config.GetProfiles() {
+		if profile.ScriptAddress != "" {
+			// Add a static TLD mapping
+			i.watched = append(
+				i.watched,
+				watchedAddr{
+					Address:  profile.ScriptAddress,
+					Tld:      profile.Tld,
+					PolicyId: profile.PolicyId,
+				},
+			)
+		} else if profile.DiscoveryAddress != "" {
+			// Add an auto-discovery address
+			i.watched = append(
+				i.watched,
+				watchedAddr{
+					Address:   profile.DiscoveryAddress,
+					PolicyId:  profile.PolicyId,
+					Discovery: true,
+				},
+			)
+		}
+	}
+	// Load discovered TLDs from state
+	discoveredAddr, err := state.GetState().GetDiscoveredAddresses()
+	if err != nil {
+		return err
+	}
+	for _, tmpAddr := range discoveredAddr {
+		i.watched = append(
+			i.watched,
+			watchedAddr{
+				Address:  tmpAddr.Address,
+				PolicyId: tmpAddr.PolicyId,
+				Tld:      tmpAddr.TldName,
+			},
+		)
+	}
 	// Create pipeline
 	i.pipeline = pipeline.New()
 	// Configure pipeline input
@@ -146,15 +194,6 @@ func (i *Indexer) Start() error {
 		filter_event.WithTypes([]string{"chainsync.transaction"}),
 	)
 	i.pipeline.AddFilter(filterEvent)
-	// We only care about transactions on a certain address
-	var filterAddresses []string
-	for _, profile := range config.GetProfiles() {
-		filterAddresses = append(filterAddresses, profile.ScriptAddress)
-	}
-	filterChainsync := filter_chainsync.New(
-		filter_chainsync.WithAddresses(filterAddresses),
-	)
-	i.pipeline.AddFilter(filterChainsync)
 	// Configure pipeline output
 	output := output_embedded.New(
 		output_embedded.WithCallbackFunc(i.handleEvent),
@@ -183,124 +222,237 @@ func (i *Indexer) Start() error {
 }
 
 func (i *Indexer) handleEvent(evt event.Event) error {
-	cfg := config.GetConfig()
 	eventTx := evt.Payload.(input_chainsync.TransactionEvent)
 	eventCtx := evt.Context.(input_chainsync.TransactionContext)
 	for _, txOutput := range eventTx.Outputs {
-		for _, profile := range config.GetProfiles() {
-			if txOutput.Address().String() != profile.ScriptAddress {
-				continue
+		// Full address
+		outAddr := txOutput.Address()
+		// Only the payment portion of the address
+		// This is useful for comparing to generated script addresses
+		outAddrPayment := outAddr.PaymentAddress()
+		if outAddrPayment == nil {
+			continue
+		}
+		for _, watchedAddr := range i.watched {
+			if watchedAddr.Discovery {
+				if outAddr.String() == watchedAddr.Address || outAddrPayment.String() == watchedAddr.Address {
+					if err := i.handleEventOutputDiscovery(eventCtx, watchedAddr.PolicyId, txOutput); err != nil {
+						return err
+					}
+					break
+				}
+			} else {
+				if outAddr.String() == watchedAddr.Address || outAddrPayment.String() == watchedAddr.Address {
+					if err := i.handleEventOutputDns(eventCtx, watchedAddr.Tld, watchedAddr.PolicyId, txOutput); err != nil {
+						return err
+					}
+					break
+				}
 			}
-			datum := txOutput.Datum()
-			if datum != nil {
-				var dnsDomain models.CardanoDnsDomain
-				if _, err := cbor.Decode(datum.Cbor(), &dnsDomain); err != nil {
-					slog.Warn(
-						fmt.Sprintf(
-							"error decoding TX (%s) output datum: %s",
-							eventCtx.TransactionHash,
-							err,
-						),
-					)
-					// Stop processing TX output if we can't parse the datum
-					continue
-				}
-				origin := string(dnsDomain.Origin)
-				// Convert origin to canonical form for consistency
-				// This mostly means adding a trailing period if it doesn't have one
-				domainName := dns.CanonicalName(origin)
-				// We want an empty value for the TLD root for convenience
-				if domainName == `.` {
-					domainName = ``
-				}
-				// Append TLD
-				domainName = dns.CanonicalName(
-					domainName + profile.Tld,
-				)
-				if cfg.Indexer.Verify {
-					// Look for asset matching domain origin and TLD policy ID
-					if txOutput.Assets() == nil {
-						slog.Warn(
-							fmt.Sprintf(
-								"ignoring datum for domain %q with no matching asset",
-								domainName,
-							),
-						)
-						continue
-					}
-					foundAsset := false
-					for _, policyId := range txOutput.Assets().Policies() {
-						for _, assetName := range txOutput.Assets().Assets(policyId) {
-							if policyId.String() == profile.PolicyId {
-								if string(assetName) == string(origin) {
-									foundAsset = true
-								} else {
-									slog.Warn(
-										fmt.Sprintf(
-											"ignoring datum for domain %q with no matching asset",
-											domainName,
-										),
-									)
-								}
-							} else {
-								slog.Warn(
-									fmt.Sprintf(
-										"ignoring datum for domain %q with no matching asset",
-										domainName,
-									),
-								)
-							}
-						}
-					}
-					if !foundAsset {
-						continue
-					}
-					// Make sure all records are for specified origin domain
-					badRecordName := false
-					for _, record := range dnsDomain.Records {
-						recordName := dns.CanonicalName(
-							string(record.Lhs),
-						)
-						if !strings.HasSuffix(recordName, domainName) {
-							slog.Warn(
-								fmt.Sprintf(
-									"ignoring datum with record %q outside of origin domain (%s)",
-									recordName,
-									domainName,
-								),
-							)
-							badRecordName = true
-							break
-						}
-					}
-					if badRecordName {
-						continue
-					}
-				}
-				// Convert domain records into our storage format
-				tmpRecords := []state.DomainRecord{}
-				for _, record := range dnsDomain.Records {
-					tmpRecord := state.DomainRecord{
-						Lhs:  string(record.Lhs),
-						Type: string(record.Type),
-						Rhs:  string(record.Rhs),
-					}
-					if record.Ttl.HasValue() {
-						tmpRecord.Ttl = int(record.Ttl.Value)
-					}
-					tmpRecords = append(tmpRecords, tmpRecord)
-				}
-				if err := state.GetState().UpdateDomain(domainName, tmpRecords); err != nil {
-					return err
-				}
-				slog.Info(
+		}
+	}
+	return nil
+}
+
+func (i *Indexer) handleEventOutputDns(eventCtx input_chainsync.TransactionContext, tldName string, policyId string, txOutput ledger.TransactionOutput) error {
+	cfg := config.GetConfig()
+	datum := txOutput.Datum()
+	if datum != nil {
+		var dnsDomain models.CardanoDnsDomain
+		if _, err := cbor.Decode(datum.Cbor(), &dnsDomain); err != nil {
+			slog.Warn(
+				fmt.Sprintf(
+					"error decoding TX (%s) output datum as CardanoDnsDomain: %s",
+					eventCtx.TransactionHash,
+					err,
+				),
+			)
+			// Stop processing TX output if we can't parse the datum
+			return nil
+		}
+		origin := string(dnsDomain.Origin)
+		// Convert origin to canonical form for consistency
+		// This mostly means adding a trailing period if it doesn't have one
+		domainName := dns.CanonicalName(origin)
+		// We want an empty value for the TLD root for convenience
+		if domainName == `.` {
+			domainName = ``
+		}
+		// Append TLD
+		domainName = dns.CanonicalName(
+			domainName + tldName,
+		)
+		if cfg.Indexer.Verify {
+			// Look for asset matching domain origin and TLD policy ID
+			if txOutput.Assets() == nil {
+				slog.Warn(
 					fmt.Sprintf(
-						"found updated registration for domain: %s",
+						"ignoring datum for domain %q with no matching asset",
 						domainName,
 					),
 				)
+				return nil
+			}
+			foundAsset := false
+			for _, tmpPolicyId := range txOutput.Assets().Policies() {
+				for _, assetName := range txOutput.Assets().Assets(tmpPolicyId) {
+					if tmpPolicyId.String() == policyId {
+						if string(assetName) == string(origin) {
+							foundAsset = true
+							break
+						}
+					}
+				}
+				if foundAsset {
+					break
+				}
+			}
+			if !foundAsset {
+				slog.Warn(
+					fmt.Sprintf(
+						"ignoring datum for domain %q with no matching asset",
+						domainName,
+					),
+				)
+				return nil
+			}
+			// Make sure all records are for specified origin domain
+			badRecordName := false
+			for _, record := range dnsDomain.Records {
+				recordName := dns.CanonicalName(
+					string(record.Lhs),
+				)
+				if !strings.HasSuffix(recordName, domainName) {
+					slog.Warn(
+						fmt.Sprintf(
+							"ignoring datum with record %q outside of origin domain (%s)",
+							recordName,
+							domainName,
+						),
+					)
+					badRecordName = true
+					break
+				}
+			}
+			if badRecordName {
+				return nil
 			}
 		}
+		// Convert domain records into our storage format
+		tmpRecords := []state.DomainRecord{}
+		for _, record := range dnsDomain.Records {
+			tmpRecord := state.DomainRecord{
+				Lhs:  string(record.Lhs),
+				Type: string(record.Type),
+				Rhs:  string(record.Rhs),
+			}
+			if record.Ttl.HasValue() {
+				tmpRecord.Ttl = int(record.Ttl.Value)
+			}
+			tmpRecords = append(tmpRecords, tmpRecord)
+		}
+		if err := state.GetState().UpdateDomain(domainName, tmpRecords); err != nil {
+			return err
+		}
+		slog.Info(
+			fmt.Sprintf(
+				"found updated registration for domain: %s",
+				domainName,
+			),
+		)
+	}
+	return nil
+}
+
+func (i *Indexer) handleEventOutputDiscovery(eventCtx input_chainsync.TransactionContext, policyId string, txOutput ledger.TransactionOutput) error {
+	cfg := config.GetConfig()
+	datum := txOutput.Datum()
+	if datum != nil {
+		var scriptRef DNSReferenceRefScriptDatum
+		if _, err := cbor.Decode(datum.Cbor(), &scriptRef); err != nil {
+			slog.Debug(
+				fmt.Sprintf(
+					"error decoding TX (%s) output datum as DNSReferenceRefScriptDatum: %s",
+					eventCtx.TransactionHash,
+					err,
+				),
+			)
+			// Stop processing TX output if we can't parse the datum
+			return nil
+		}
+		// Look for asset matching policy ID
+		var assetName []byte
+		if txOutput.Assets() == nil {
+			slog.Warn(
+				fmt.Sprintf(
+					"ignoring datum for DNS script for domain %q with no matching asset",
+					scriptRef.TldName,
+				),
+			)
+			return nil
+		}
+		for _, tmpPolicyId := range txOutput.Assets().Policies() {
+			for _, tmpAssetName := range txOutput.Assets().Assets(tmpPolicyId) {
+				if tmpPolicyId.String() == policyId {
+					assetName = tmpAssetName
+					break
+				}
+			}
+		}
+		if assetName == nil {
+			slog.Warn(
+				fmt.Sprintf(
+					"ignoring datum for DNS script for domain %q with no matching asset",
+					scriptRef.TldName,
+				),
+			)
+			return nil
+		}
+		// Add new TLD to watched addresses
+		network := ouroboros.NetworkByName(cfg.Indexer.Network)
+		if network == ouroboros.NetworkInvalid {
+			return fmt.Errorf("unknown named network: %s", cfg.Indexer.Network)
+		}
+		scriptAddr, err := ledger.NewAddressFromParts(
+			ledger.AddressTypeScriptNone,
+			network.Id,
+			assetName,
+			nil,
+		)
+		if err != nil {
+			return err
+		}
+		i.watched = append(
+			i.watched,
+			watchedAddr{
+				Tld: strings.TrimPrefix(
+					string(scriptRef.TldName),
+					`.`,
+				),
+				PolicyId: hex.EncodeToString(scriptRef.SymbolDrat),
+				Address:  scriptAddr.String(),
+			},
+		)
+		// Add to state
+		err = state.GetState().AddDiscoveredAddress(
+			state.DiscoveredAddress{
+				Address:  scriptAddr.String(),
+				PolicyId: hex.EncodeToString(scriptRef.SymbolDrat),
+				TldName: strings.TrimPrefix(
+					string(scriptRef.TldName),
+					`.`,
+				),
+			},
+		)
+		if err != nil {
+			return err
+		}
+		slog.Info(
+			fmt.Sprintf(
+				"found new TLD: %s",
+				scriptRef.TldName,
+			),
+		)
 	}
 	return nil
 }

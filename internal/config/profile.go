@@ -1,4 +1,4 @@
-// Copyright 2023 Blink Labs Software
+// Copyright 2024 Blink Labs Software
 //
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file or at
@@ -7,12 +7,13 @@
 package config
 
 type Profile struct {
-	Network       string // Cardano network name
-	Tld           string // Top-level domain
-	PolicyId      string // Verification asset policy ID
-	ScriptAddress string // Address to follow
-	InterceptSlot uint64 // Chain-sync initial intercept slot
-	InterceptHash string // Chain-sync initial intercept hash
+	Network          string // Cardano network name
+	Tld              string // Top-level domain
+	PolicyId         string // Verification asset policy ID
+	ScriptAddress    string // Address to follow
+	InterceptSlot    uint64 // Chain-sync initial intercept slot
+	InterceptHash    string // Chain-sync initial intercept hash
+	DiscoveryAddress string // Auto-discovery address to follow
 }
 
 func GetProfiles() []Profile {
@@ -64,5 +65,13 @@ var Profiles = map[string]Profile{
 		// The intercept slot/hash correspond to the block before the first TX on the above address
 		InterceptSlot: 67799029,
 		InterceptHash: "4815dae9cd8f492ab51b109ba87d091ae85a0999af33ac459d8504122cb911f7",
+	},
+	"auto-preprod": Profile{
+		Network:          "preprod",
+		PolicyId:         "63cdaef8b84702282c3454ae130ada94a9b200e32be21abd47fc636b",
+		DiscoveryAddress: "addr_test1xrhqrug2hnc9az4ru02kp9rlfcppl464gl4yc8s8jm5p8kygc3uvcfh3r3kaa5gyk5l2vgdl8vj8cstslf4w2ajuy0wsp5fm89",
+		// The intercept slot/hash correspond to the block before the first TX on the above address
+		InterceptSlot: 67778432,
+		InterceptHash: "6db5cdcfa1ee9cc137b0b238ff9251d4481c23bf49ad6272cb833b034a003cbe",
 	},
 }
