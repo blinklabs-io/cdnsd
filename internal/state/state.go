@@ -281,12 +281,21 @@ func (s *State) UpdateDomain(
 	return err
 }
 
-func (s *State) LookupRecords(recordTypes []string, recordName string) ([]DomainRecord, error) {
+func (s *State) LookupRecords(
+	recordTypes []string,
+	recordName string,
+) ([]DomainRecord, error) {
 	ret := []DomainRecord{}
 	recordName = strings.Trim(recordName, `.`)
 	err := s.db.View(func(txn *badger.Txn) error {
 		for _, recordType := range recordTypes {
-			keyPrefix := []byte(fmt.Sprintf("r_%s_%s_", strings.ToUpper(recordType), recordName))
+			keyPrefix := []byte(
+				fmt.Sprintf(
+					"r_%s_%s_",
+					strings.ToUpper(recordType),
+					recordName,
+				),
+			)
 			it := txn.NewIterator(badger.DefaultIteratorOptions)
 			defer it.Close()
 			for it.Seek(keyPrefix); it.ValidForPrefix(keyPrefix); it.Next() {

@@ -109,7 +109,10 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 				tmpRR, err := stateRecordToDnsRR(tmpRecord)
 				if err != nil {
 					slog.Error(
-						fmt.Sprintf("failed to convert state record to dns.RR: %s", err),
+						fmt.Sprintf(
+							"failed to convert state record to dns.RR: %s",
+							err,
+						),
 					)
 					return
 				}
@@ -367,7 +370,8 @@ func findNameserversForDomain(
 		lookupDomainName := strings.Join(queryLabels[startLabelIdx:], ".")
 		// Convert to canonical form for consistency
 		lookupDomainName = dns.CanonicalName(lookupDomainName)
-		nsRecords, err := state.GetState().LookupRecords([]string{"NS"}, lookupDomainName)
+		nsRecords, err := state.GetState().
+			LookupRecords([]string{"NS"}, lookupDomainName)
 		if err != nil {
 			return "", nil, err
 		}
@@ -375,12 +379,16 @@ func findNameserversForDomain(
 			ret := map[string][]net.IP{}
 			for _, nsRecord := range nsRecords {
 				// Get matching A/AAAA records for NS entry
-				aRecords, err := state.GetState().LookupRecords([]string{"A", "AAAA"}, nsRecord.Rhs)
+				aRecords, err := state.GetState().
+					LookupRecords([]string{"A", "AAAA"}, nsRecord.Rhs)
 				if err != nil {
 					return "", nil, err
 				}
 				for _, aRecord := range aRecords {
-					ret[nsRecord.Rhs] = append(ret[nsRecord.Rhs], net.ParseIP(aRecord.Rhs))
+					ret[nsRecord.Rhs] = append(
+						ret[nsRecord.Rhs],
+						net.ParseIP(aRecord.Rhs),
+					)
 				}
 			}
 			return dns.Fqdn(lookupDomainName), ret, nil
