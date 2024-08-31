@@ -235,7 +235,8 @@ func (i *Indexer) handleEvent(evt event.Event) error {
 		}
 		for _, watchedAddr := range i.watched {
 			if watchedAddr.Discovery {
-				if outAddr.String() == watchedAddr.Address || outAddrPayment.String() == watchedAddr.Address {
+				if outAddr.String() == watchedAddr.Address ||
+					outAddrPayment.String() == watchedAddr.Address {
 					if err := i.handleEventOutputDiscovery(eventCtx, watchedAddr.PolicyId, txOutput); err != nil {
 						return err
 					}
@@ -254,7 +255,12 @@ func (i *Indexer) handleEvent(evt event.Event) error {
 	return nil
 }
 
-func (i *Indexer) handleEventOutputDns(eventCtx input_chainsync.TransactionContext, tldName string, policyId string, txOutput ledger.TransactionOutput) error {
+func (i *Indexer) handleEventOutputDns(
+	eventCtx input_chainsync.TransactionContext,
+	tldName string,
+	policyId string,
+	txOutput ledger.TransactionOutput,
+) error {
 	cfg := config.GetConfig()
 	datum := txOutput.Datum()
 	if datum != nil {
@@ -364,7 +370,11 @@ func (i *Indexer) handleEventOutputDns(eventCtx input_chainsync.TransactionConte
 	return nil
 }
 
-func (i *Indexer) handleEventOutputDiscovery(eventCtx input_chainsync.TransactionContext, policyId string, txOutput ledger.TransactionOutput) error {
+func (i *Indexer) handleEventOutputDiscovery(
+	eventCtx input_chainsync.TransactionContext,
+	policyId string,
+	txOutput ledger.TransactionOutput,
+) error {
 	cfg := config.GetConfig()
 	datum := txOutput.Datum()
 	if datum != nil {

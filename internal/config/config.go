@@ -26,8 +26,8 @@ type Config struct {
 }
 
 type LoggingConfig struct {
-	Debug    bool `yaml:"debug" envconfig:"LOGGING_DEBUG"`
-	QueryLog bool `yaml:"queryLog"     envconfig:"LOGGING_QUERY_LOG"`
+	Debug    bool `yaml:"debug"    envconfig:"LOGGING_DEBUG"`
+	QueryLog bool `yaml:"queryLog" envconfig:"LOGGING_QUERY_LOG"`
 }
 
 type DnsConfig struct {
@@ -136,7 +136,8 @@ func Load(configFile string) (*Config, error) {
 					}
 				}
 				// Update intercept slot/hash if earlier than any other profiles so far
-				if interceptSlot == 0 || profileData.InterceptSlot < interceptSlot {
+				if interceptSlot == 0 ||
+					profileData.InterceptSlot < interceptSlot {
 					interceptSlot = profileData.InterceptSlot
 					interceptHash = profileData.InterceptHash
 				}
@@ -145,7 +146,11 @@ func Load(configFile string) (*Config, error) {
 			}
 		}
 		if !foundProfile {
-			return nil, fmt.Errorf("unknown profile: %s: available profiles: %s", profile, strings.Join(availableProfiles, ","))
+			return nil, fmt.Errorf(
+				"unknown profile: %s: available profiles: %s",
+				profile,
+				strings.Join(availableProfiles, ","),
+			)
 		}
 	}
 	// Provide default intercept point from profile(s)

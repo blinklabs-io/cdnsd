@@ -98,9 +98,16 @@ func main() {
 
 	// Start metrics listener
 	if cfg.Metrics.ListenPort > 0 {
-		metricsListenAddr := fmt.Sprintf("%s:%d", cfg.Metrics.ListenAddress, cfg.Metrics.ListenPort)
+		metricsListenAddr := fmt.Sprintf(
+			"%s:%d",
+			cfg.Metrics.ListenAddress,
+			cfg.Metrics.ListenPort,
+		)
 		slog.Info(
-			fmt.Sprintf("starting listener for prometheus metrics connections on %s", metricsListenAddr),
+			fmt.Sprintf(
+				"starting listener for prometheus metrics connections on %s",
+				metricsListenAddr,
+			),
 		)
 		metricsMux := http.NewServeMux()
 		metricsMux.Handle("/metrics", promhttp.Handler())

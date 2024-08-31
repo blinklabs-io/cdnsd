@@ -27,22 +27,34 @@ func (d *DNSReferenceRefScriptDatum) UnmarshalCBOR(cborData []byte) error {
 		return err
 	}
 	if tmpData.Constructor() != 3 {
-		return fmt.Errorf("unexpected outer constructor index: %d", tmpData.Constructor())
+		return fmt.Errorf(
+			"unexpected outer constructor index: %d",
+			tmpData.Constructor(),
+		)
 	}
 	tmpDataFields := tmpData.Fields()
 	if len(tmpDataFields) != 1 {
-		return fmt.Errorf("unexpected inner field count: expected 1, got %d", len(tmpDataFields))
+		return fmt.Errorf(
+			"unexpected inner field count: expected 1, got %d",
+			len(tmpDataFields),
+		)
 	}
 	fieldInner, ok := tmpDataFields[0].(cbor.Constructor)
 	if !ok {
-		return fmt.Errorf("unexpected data type %T for outer constructor field", tmpDataFields[0])
+		return fmt.Errorf(
+			"unexpected data type %T for outer constructor field",
+			tmpDataFields[0],
+		)
 	}
 	var tmpDataInner cbor.Constructor
 	if _, err := cbor.Decode(fieldInner.Cbor(), &tmpDataInner); err != nil {
 		return err
 	}
 	if tmpDataInner.Constructor() != 1 {
-		return fmt.Errorf("unexpected inner constructor index: %d", tmpDataInner.Constructor())
+		return fmt.Errorf(
+			"unexpected inner constructor index: %d",
+			tmpDataInner.Constructor(),
+		)
 	}
 	return cbor.DecodeGeneric(tmpDataInner.FieldsCbor(), d)
 }
