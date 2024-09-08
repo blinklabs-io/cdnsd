@@ -36,6 +36,12 @@ func Start() error {
 		cfg.Dns.ListenAddress,
 		cfg.Dns.ListenPort,
 	)
+	slog.Info(
+		fmt.Sprintf(
+			"starting DNS listener on %s",
+			listenAddr,
+		),
+	)
 	// Setup handler
 	dns.HandleFunc(".", handleQuery)
 	// UDP listener
