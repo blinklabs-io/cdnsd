@@ -136,13 +136,6 @@ func main() {
 	}
 
 	// Start DNS listener
-	slog.Info(
-		fmt.Sprintf(
-			"starting DNS listener on %s:%d",
-			cfg.Dns.ListenAddress,
-			cfg.Dns.ListenPort,
-		),
-	)
 	if err := dns.Start(); err != nil {
 		slog.Error(
 			fmt.Sprintf("failed to start DNS listener: %s", err),
