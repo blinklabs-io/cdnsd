@@ -17,6 +17,8 @@ import (
 	"github.com/blinklabs-io/cdnsd/internal/config"
 	"github.com/blinklabs-io/cdnsd/internal/state"
 	ouroboros "github.com/blinklabs-io/gouroboros"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	"github.com/blinklabs-io/adder/event"
 	filter_event "github.com/blinklabs-io/adder/filter/event"
@@ -32,6 +34,17 @@ import (
 
 const (
 	syncStatusLogInterval = 30 * time.Second
+)
+
+var (
+	metricSlot = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "indexer_slot",
+		Help: "Indexer current slot number",
+	})
+	metricTipSlot = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "indexer_tip_slot",
+		Help: "Slot number for upstream chain tip",
+	})
 )
 
 type Domain struct {
@@ -108,6 +121,8 @@ func (i *Indexer) Start() error {
 		input_chainsync.WithStatusUpdateFunc(
 			func(status input_chainsync.ChainSyncStatus) {
 				i.syncStatus = status
+				metricSlot.Set(float64(status.SlotNumber))
+				metricTipSlot.Set(float64(status.TipSlotNumber))
 				if err := state.GetState().UpdateCursor(status.SlotNumber, status.BlockHash); err != nil {
 					slog.Error(
 						fmt.Sprintf("failed to update cursor: %s", err),
