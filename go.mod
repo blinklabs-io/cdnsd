@@ -3,9 +3,9 @@ module github.com/blinklabs-io/cdnsd
 go 1.22
 
 require (
-	github.com/blinklabs-io/adder v0.23.2
+	github.com/blinklabs-io/adder v0.23.3
 	github.com/blinklabs-io/cardano-models v0.3.6
-	github.com/blinklabs-io/gouroboros v0.93.2
+	github.com/blinklabs-io/gouroboros v0.93.3
 	github.com/dgraph-io/badger/v4 v4.3.0
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/miekg/dns v1.1.62
@@ -42,12 +42,12 @@ require (
 	go.opencensus.io v0.24.0 // indirect
 	go.uber.org/multierr v1.10.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
-	golang.org/x/crypto v0.26.0 // indirect
+	golang.org/x/crypto v0.27.0 // indirect
 	golang.org/x/mod v0.18.0 // indirect
 	golang.org/x/net v0.28.0 // indirect
 	golang.org/x/sync v0.8.0 // indirect
-	golang.org/x/sys v0.24.0 // indirect
-	golang.org/x/text v0.17.0 // indirect
+	golang.org/x/sys v0.25.0 // indirect
+	golang.org/x/text v0.18.0 // indirect
 	golang.org/x/tools v0.22.0 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
 )
