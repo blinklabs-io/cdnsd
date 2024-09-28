@@ -4,7 +4,7 @@ go 1.22
 
 require (
 	github.com/blinklabs-io/adder v0.23.4
-	github.com/blinklabs-io/cardano-models v0.3.6
+	github.com/blinklabs-io/cardano-models v0.3.7
 	github.com/blinklabs-io/gouroboros v0.94.3
 	github.com/dgraph-io/badger/v4 v4.3.0
 	github.com/kelseyhightower/envconfig v1.4.0
@@ -24,7 +24,7 @@ require (
 	github.com/gabriel-vasile/mimetype v1.4.3 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
-	github.com/go-playground/validator/v10 v10.22.0 // indirect
+	github.com/go-playground/validator/v10 v10.22.1 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/groupcache v0.0.0-20200121045136-8c9f03a8e57e // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
