@@ -22,6 +22,7 @@ type Config struct {
 	Debug    DebugConfig   `yaml:"debug"`
 	Indexer  IndexerConfig `yaml:"indexer"`
 	State    StateConfig   `yaml:"state"`
+	Tls      TlsConfig     `yaml:"tls"`
 	Profiles []string      `yaml:"profiles" envconfig:"PROFILES"`
 }
 
@@ -33,6 +34,7 @@ type LoggingConfig struct {
 type DnsConfig struct {
 	ListenAddress    string   `yaml:"address"          envconfig:"DNS_LISTEN_ADDRESS"`
 	ListenPort       uint     `yaml:"port"             envconfig:"DNS_LISTEN_PORT"`
+	ListenTlsPort    uint     `yaml:"tlsPort"          envconfig:"DNS_LISTEN_TLS_PORT"`
 	RecursionEnabled bool     `yaml:"recursionEnabled" envconfig:"DNS_RECURSION"`
 	FallbackServers  []string `yaml:"fallbackServers"  envconfig:"DNS_FALLBACK_SERVERS"`
 }
@@ -61,6 +63,11 @@ type StateConfig struct {
 	Directory string `yaml:"dir" envconfig:"STATE_DIR"`
 }
 
+type TlsConfig struct {
+	CertFilePath string `yaml:"certFilePath" envconfig:"TLS_CERT_FILE_PATH"`
+	KeyFilePath  string `yaml:"keyFilePath"  envconfig:"TLS_KEY_FILE_PATH"`
+}
+
 // Singleton config instance with default values
 var globalConfig = &Config{
 	Logging: LoggingConfig{
@@ -69,6 +76,7 @@ var globalConfig = &Config{
 	Dns: DnsConfig{
 		ListenAddress: "",
 		ListenPort:    8053,
+		ListenTlsPort: 8853,
 		// hdns.io
 		FallbackServers: []string{
 			"103.196.38.38",
