@@ -8,10 +8,10 @@ github.com/blinklabs-io/adder v0.23.4 h1:kBEacpX+SqiMSIItJf5BHg987phwqs9UtmePEq8
 github.com/blinklabs-io/adder v0.23.4/go.mod h1:LfLui6ULQyv7pTloIq8bZl2577Lhd6XxDxRiUQSxRmU=
 github.com/blinklabs-io/cardano-models v0.3.7 h1:KkIFnimGf/5JLL8JPsH7hbfzUrC8qfHBYv3fx+AJSb4=
 github.com/blinklabs-io/cardano-models v0.3.7/go.mod h1:gnL+MVNX7b4bxH7AjeV1xJBbwIqwvXhJDOWiVt5ji50=
-github.com/blinklabs-io/gouroboros v0.96.0 h1:UYF2fwOo9MT6uHrpwHz+1krVib6SZ9sDkZ/C5KQxwdA=
-github.com/blinklabs-io/gouroboros v0.96.0/go.mod h1:lfvV4sV5tNz/qkaLiR85pKpKqPlHfAa5wFhWGbgsXZ0=
-github.com/blinklabs-io/ouroboros-mock v0.3.3 h1:c6jN9qcLzNQSVh3zjPE61gF33UkkRRIiNqSGBkZ10cY=
-github.com/blinklabs-io/ouroboros-mock v0.3.3/go.mod h1:UXkR/8qA5w/WtkzffOIdXudgOndN99DEorgRwy4ynN8=
+github.com/blinklabs-io/gouroboros v0.99.0 h1:tGiti2mPjQM/rVOYi1ZrCSlKh8Qt3iQUkDdsOeWKuvw=
+github.com/blinklabs-io/gouroboros v0.99.0/go.mod h1:gU9pBcL1h584sVqYF8H7JJcB2x0n1HdWcmWP11VYxPE=
+github.com/blinklabs-io/ouroboros-mock v0.3.4 h1:codPfiI5vLeD6YdhKL5VwYSzy2N3Dsgx6xjcLsqFaJQ=
+github.com/blinklabs-io/ouroboros-mock v0.3.4/go.mod h1:e/wgG1ZYVenroN2XEMXy7DgEfdmP7KXVRHIQKuh8E/0=
 github.com/census-instrumentation/opencensus-proto v0.2.1/go.mod h1:f6KPmirojxKA12rnyqOA5BBL4O983OfeGPqjHWSTneU=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
 github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
@@ -119,8 +119,8 @@ github.com/stretchr/testify v1.8.0/go.mod h1:yNjHg4UonilssWZ8iaSj1OCr/vHnekPRkoO
 github.com/stretchr/testify v1.8.1/go.mod h1:w2LPCIKwWwSfY2zedu0+kehJoqGctiVI29o6fzry7u4=
 github.com/stretchr/testify v1.9.0 h1:HtqpIVDClZ4nwg75+f6Lvsy/wHu+3BoSGCbBAcpTsTg=
 github.com/stretchr/testify v1.9.0/go.mod h1:r2ic/lqez/lEtzL7wO/rwa5dbSLXVDPFyf8C91i36aY=
-github.com/utxorpc/go-codegen v0.9.0 h1:sV5vK/QiQs3WvKynRVo+U+5n2tmKU7yMz5y3rEX90Hg=
-github.com/utxorpc/go-codegen v0.9.0/go.mod h1:+npvJc9wftIf8JMtWaRXxwjX0YlOCpNp1OlZVioNEO0=
+github.com/utxorpc/go-codegen v0.10.0 h1:EVRNc136CThXbbGeYV/oIy6NKfcZGLH2QSRmLTPE6TQ=
+github.com/utxorpc/go-codegen v0.10.0/go.mod h1:+npvJc9wftIf8JMtWaRXxwjX0YlOCpNp1OlZVioNEO0=
 github.com/x448/float16 v0.8.4 h1:qLwI1I70+NjRFUR3zs1JPUCgaCXSh3SW62uAKT1mSBM=
 github.com/x448/float16 v0.8.4/go.mod h1:14CWIYCyZA/cWjXOioeEpHeN/83MdbZDRQHoFcYsOfg=
 github.com/yuin/goldmark v1.1.27/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
