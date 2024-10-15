@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/blinklabs-io/cdnsd/internal/config"
+	"github.com/blinklabs-io/cdnsd/internal/logging"
 	"github.com/blinklabs-io/cdnsd/internal/state"
 	ouroboros "github.com/blinklabs-io/gouroboros"
 	"github.com/prometheus/client_golang/prometheus"
@@ -139,7 +140,7 @@ func (i *Indexer) Start() error {
 		),
 		input_chainsync.WithBulkMode(true),
 		input_chainsync.WithAutoReconnect(true),
-		input_chainsync.WithLogger(NewAdderLogger()),
+		input_chainsync.WithLogger(logging.GetLogger()),
 	}
 	if cfg.Indexer.NetworkMagic > 0 {
 		inputOpts = append(
@@ -508,44 +509,4 @@ func (i *Indexer) LookupDomain(name string) *Domain {
 // GetIndexer returns the global indexer instance
 func GetIndexer() *Indexer {
 	return globalIndexer
-}
-
-// TODO: remove the below once we switch adder to slog
-
-// AdderLogger is a wrapper type to give our logger the expected interface
-type AdderLogger struct{}
-
-func NewAdderLogger() *AdderLogger {
-	return &AdderLogger{}
-}
-
-func (a *AdderLogger) Infof(msg string, args ...any) {
-	slog.Info(
-		fmt.Sprintf(msg, args...),
-	)
-}
-
-func (a *AdderLogger) Warnf(msg string, args ...any) {
-	slog.Warn(
-		fmt.Sprintf(msg, args...),
-	)
-}
-
-func (a *AdderLogger) Debugf(msg string, args ...any) {
-	slog.Debug(
-		fmt.Sprintf(msg, args...),
-	)
-}
-
-func (a *AdderLogger) Errorf(msg string, args ...any) {
-	slog.Error(
-		fmt.Sprintf(msg, args...),
-	)
-}
-
-func (a *AdderLogger) Fatalf(msg string, args ...any) {
-	slog.Error(
-		fmt.Sprintf(msg, args...),
-	)
-	os.Exit(1)
 }

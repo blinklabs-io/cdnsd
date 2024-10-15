@@ -21,6 +21,7 @@ import (
 	"github.com/blinklabs-io/cdnsd/internal/config"
 	"github.com/blinklabs-io/cdnsd/internal/dns"
 	"github.com/blinklabs-io/cdnsd/internal/indexer"
+	"github.com/blinklabs-io/cdnsd/internal/logging"
 	"github.com/blinklabs-io/cdnsd/internal/state"
 	"github.com/blinklabs-io/cdnsd/internal/version"
 )
@@ -45,16 +46,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Configure logger
-	logLevel := slog.LevelInfo
-	if cfg.Logging.Debug {
-		logLevel = slog.LevelDebug
-	}
-	logger := slog.New(
-		slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-			Level: logLevel,
-		}),
-	)
+	logger := logging.GetLogger()
 	slog.SetDefault(logger)
 
 	slog.Info(
