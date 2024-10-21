@@ -5,9 +5,9 @@ go 1.22
 toolchain go1.22.6
 
 require (
-	github.com/blinklabs-io/adder v0.24.0
+	github.com/blinklabs-io/adder v0.24.3
 	github.com/blinklabs-io/cardano-models v0.3.7
-	github.com/blinklabs-io/gouroboros v0.99.0
+	github.com/blinklabs-io/gouroboros v0.101.0
 	github.com/dgraph-io/badger/v4 v4.3.1
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/miekg/dns v1.1.62
@@ -45,7 +45,7 @@ require (
 	github.com/prometheus/client_model v0.6.1 // indirect
 	github.com/prometheus/common v0.55.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
-	github.com/utxorpc/go-codegen v0.10.0 // indirect
+	github.com/utxorpc/go-codegen v0.11.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	golang.org/x/crypto v0.28.0 // indirect
@@ -55,5 +55,5 @@ require (
 	golang.org/x/sys v0.26.0 // indirect
 	golang.org/x/text v0.19.0 // indirect
 	golang.org/x/tools v0.22.0 // indirect
-	google.golang.org/protobuf v1.34.2 // indirect
+	google.golang.org/protobuf v1.35.1 // indirect
 )

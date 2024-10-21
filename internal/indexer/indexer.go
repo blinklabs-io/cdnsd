@@ -435,8 +435,8 @@ func (i *Indexer) handleEventOutputDiscovery(
 			return nil
 		}
 		// Add new TLD to watched addresses
-		network := ouroboros.NetworkByName(cfg.Indexer.Network)
-		if network == ouroboros.NetworkInvalid {
+		network, ok := ouroboros.NetworkByName(cfg.Indexer.Network)
+		if !ok {
 			return fmt.Errorf("unknown named network: %s", cfg.Indexer.Network)
 		}
 		scriptAddr, err := ledger.NewAddressFromParts(
