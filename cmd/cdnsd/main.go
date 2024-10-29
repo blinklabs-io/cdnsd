@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	_ "go.uber.org/automaxprocs"
+	"go.uber.org/automaxprocs/maxprocs"
 
 	"github.com/blinklabs-io/cdnsd/internal/config"
 	"github.com/blinklabs-io/cdnsd/internal/dns"
@@ -28,6 +28,10 @@ import (
 
 var cmdlineFlags struct {
 	configFile string
+}
+
+func slogPrintf(format string, v ...any) {
+	slog.Info(fmt.Sprintf(format, v...))
 }
 
 func main() {
@@ -46,8 +50,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Configure logger
+	logging.Configure()
 	logger := logging.GetLogger()
 	slog.SetDefault(logger)
+
+	// Configure max processes with our logger wrapper, toss undo func
+	_, err = maxprocs.Set(maxprocs.Logger(slogPrintf))
+	if err != nil {
+		// If we hit this, something really wrong happened
+		logger.Error(err.Error())
+		os.Exit(1)
+	}
 
 	slog.Info(
 		fmt.Sprintf("cdnsd %s started", version.GetVersionString()),
