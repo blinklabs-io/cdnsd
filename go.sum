@@ -14,8 +14,8 @@ github.com/blinklabs-io/adder v0.24.3 h1:JAAmr9NhXi9HyEdSUk3hHtjiGF1vzir5lDRF9d9
 github.com/blinklabs-io/adder v0.24.3/go.mod h1:hXSQK+bTBjQnGoR5WXYCSH4IghdSCTwH3oncguAaNqU=
 github.com/blinklabs-io/cardano-models v0.3.7 h1:KkIFnimGf/5JLL8JPsH7hbfzUrC8qfHBYv3fx+AJSb4=
 github.com/blinklabs-io/cardano-models v0.3.7/go.mod h1:gnL+MVNX7b4bxH7AjeV1xJBbwIqwvXhJDOWiVt5ji50=
-github.com/blinklabs-io/gouroboros v0.101.0 h1:+5+C76cgyWNlFInp2HQpaGpiUSVt6bH/fUSDSo3VEaw=
-github.com/blinklabs-io/gouroboros v0.101.0/go.mod h1:otpDPTJTU/EVt3J4axaJAA1gF/0UtalSdVxVqXK8Zuk=
+github.com/blinklabs-io/gouroboros v0.102.0 h1:SSw1SW5a/eunPJdwJHARur/dlGdTrLEq5ScRFZjhen0=
+github.com/blinklabs-io/gouroboros v0.102.0/go.mod h1:okgJskD4KXG5itGM95gUl6J+rKbURzaP++HTeCokgkM=
 github.com/blinklabs-io/ouroboros-mock v0.3.4 h1:codPfiI5vLeD6YdhKL5VwYSzy2N3Dsgx6xjcLsqFaJQ=
 github.com/blinklabs-io/ouroboros-mock v0.3.4/go.mod h1:e/wgG1ZYVenroN2XEMXy7DgEfdmP7KXVRHIQKuh8E/0=
 github.com/buger/jsonparser v1.1.1 h1:2PnMjfWD7wBILjqQbt530v576A/cAbQvEW9gGIpYMUs=
