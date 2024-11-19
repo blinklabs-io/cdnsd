@@ -297,6 +297,9 @@ func stateRecordToDnsRR(record state.DomainRecord) (dns.RR, error) {
 }
 
 func copyResponse(req *dns.Msg, srcResp *dns.Msg, destResp *dns.Msg) {
+	if srcResp == nil {
+		return
+	}
 	// Copy relevant data from original request and source response into destination response
 	destResp.SetRcode(req, srcResp.MsgHdr.Rcode)
 	destResp.RecursionDesired = req.RecursionDesired
@@ -344,6 +347,9 @@ func doQuery(msg *dns.Msg, address string, recursive bool) (*dns.Msg, error) {
 	resp, err := dns.Exchange(msg, address)
 	if err != nil {
 		return nil, err
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("dns response empty")
 	}
 	slog.Debug(
 		fmt.Sprintf(
