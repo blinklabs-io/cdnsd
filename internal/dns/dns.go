@@ -84,6 +84,9 @@ func startListener(server *dns.Server) {
 }
 
 func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
+	if r.Question == nil {
+		return
+	}
 	cfg := config.GetConfig()
 	m := new(dns.Msg)
 
@@ -165,6 +168,18 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 		if cfg.Dns.RecursionEnabled {
 			// Pick random nameserver for domain
 			tmpNameserver := randomNameserverAddress(nameservers)
+			if tmpNameserver == nil {
+				m.SetRcode(r, dns.RcodeServerFailure)
+				if err := w.WriteMsg(m); err != nil {
+					slog.Error(
+						"unable to get nameserver",
+					)
+				}
+				slog.Error(
+					"unable to get nameserver",
+				)
+				return
+			}
 			// Query the random domain nameserver we picked above
 			resp, err := doQuery(r, tmpNameserver.String(), true)
 			if err != nil {
@@ -469,9 +484,13 @@ func getAddressForNameFromResponse(msg *dns.Msg, recordName string) string {
 	}
 	switch v := retRR.(type) {
 	case *dns.A:
-		return v.A.String()
+		if v.A != nil {
+			return v.A.String()
+		}
 	case *dns.AAAA:
-		return v.AAAA.String()
+		if v.AAAA != nil {
+			return v.AAAA.String()
+		}
 	}
 	return ""
 }
