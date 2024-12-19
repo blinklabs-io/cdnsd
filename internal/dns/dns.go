@@ -62,7 +62,11 @@ func Start() error {
 	go startListener(serverTcp)
 	// TLS listener
 	if cfg.Tls.CertFilePath != "" && cfg.Tls.KeyFilePath != "" {
-		listenTlsAddr := fmt.Sprintf("%s:%d", cfg.Dns.ListenAddress, cfg.Dns.ListenTlsPort)
+		listenTlsAddr := fmt.Sprintf(
+			"%s:%d",
+			cfg.Dns.ListenAddress,
+			cfg.Dns.ListenTlsPort,
+		)
 		serverTls := &dns.Server{
 			Addr:       listenTlsAddr,
 			Net:        "tcp-tls",
