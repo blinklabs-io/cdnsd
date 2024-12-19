@@ -1,8 +1,6 @@
 module github.com/blinklabs-io/cdnsd
 
-go 1.22
-
-toolchain go1.22.6
+go 1.22.9
 
 require (
 	github.com/blinklabs-io/adder v0.25.2
