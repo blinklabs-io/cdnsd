@@ -40,7 +40,7 @@ func GetAvailableProfiles() []string {
 var Profiles = map[string]Profile{
 	// This (default) profile corresponds to the values specified in:
 	// https://github.com/blinklabs-io/cardano-dns/blob/main/README.md
-	"cardano-preprod-testing": Profile{
+	"cardano-preprod-testing": {
 		Network:       "preprod",
 		Tld:           "cardano",
 		PolicyId:      "6af60c2a7a06551ef09b3810a41d086b26ca26f926d22e462103194d",
@@ -48,7 +48,7 @@ var Profiles = map[string]Profile{
 		InterceptSlot: 50844079,
 		InterceptHash: "81325118471fddb00a20327572b371aee7cce13b846a18500d011b9cefd2a34c",
 	},
-	"ada-preprod": Profile{
+	"ada-preprod": {
 		Network:       "preprod",
 		Tld:           "ada",
 		PolicyId:      "32c89cdb9c73b904ae0fd230770ee082d6e5fe090b20eaa08ee70dd3",
@@ -57,7 +57,7 @@ var Profiles = map[string]Profile{
 		InterceptSlot: 65308876,
 		InterceptHash: "435703531e57bfe9b4d309e7360efc43e04d06531c9393530c57bebf029ec634",
 	},
-	"hydra-preprod": Profile{
+	"hydra-preprod": {
 		Network:       "preprod",
 		Tld:           "hydra",
 		PolicyId:      "f5f8228a4bd56704ad3c612ecc74e5d2e5d15292b8cae3aaa8065fc1",
@@ -66,7 +66,7 @@ var Profiles = map[string]Profile{
 		InterceptSlot: 67799029,
 		InterceptHash: "4815dae9cd8f492ab51b109ba87d091ae85a0999af33ac459d8504122cb911f7",
 	},
-	"auto-preprod": Profile{
+	"auto-preprod": {
 		Network:          "preprod",
 		PolicyId:         "63cdaef8b84702282c3454ae130ada94a9b200e32be21abd47fc636b",
 		DiscoveryAddress: "addr_test1xrhqrug2hnc9az4ru02kp9rlfcppl464gl4yc8s8jm5p8kygc3uvcfh3r3kaa5gyk5l2vgdl8vj8cstslf4w2ajuy0wsp5fm89",
