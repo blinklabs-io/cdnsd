@@ -513,6 +513,9 @@ func randomNameserver(nameservers map[string][]net.IP) (string, string) {
 	if len(mapKeys) > 0 {
 		randNsName := mapKeys[rand.Intn(len(mapKeys))]
 		randNsAddresses := nameservers[randNsName]
+		if randNsAddresses == nil {
+			return "", ""
+		}
 		randNsAddress := randNsAddresses[rand.Intn(len(randNsAddresses))].String()
 		return randNsName, randNsAddress
 	}
