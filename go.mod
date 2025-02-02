@@ -5,7 +5,7 @@ go 1.22.11
 require (
 	github.com/blinklabs-io/adder v0.25.4
 	github.com/blinklabs-io/cardano-models v0.4.0
-	github.com/blinklabs-io/gouroboros v0.108.0
+	github.com/blinklabs-io/gouroboros v0.108.1
 	github.com/dgraph-io/badger/v4 v4.5.0
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/miekg/dns v1.1.62
@@ -20,6 +20,7 @@ require (
 	github.com/SundaeSwap-finance/ogmigo v0.8.2-0.20250113211512-19cbb328b538 // indirect
 	github.com/aws/aws-sdk-go v1.55.5 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
+	github.com/btcsuite/btcd/btcutil v1.1.3 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dgraph-io/ristretto/v2 v2.0.0 // indirect
