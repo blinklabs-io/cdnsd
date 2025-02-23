@@ -1,4 +1,4 @@
-// Copyright 2024 Blink Labs Software
+// Copyright 2025 Blink Labs Software
 //
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file or at
@@ -11,9 +11,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	_ "net/http/pprof"
 	"os"
 	"time"
+
+	// #nosec G108
+	_ "net/http/pprof"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/automaxprocs/maxprocs"
@@ -85,14 +87,15 @@ func main() {
 			),
 		)
 		go func() {
-			err := http.ListenAndServe(
-				fmt.Sprintf(
+			debugger := &http.Server{
+				Addr: fmt.Sprintf(
 					"%s:%d",
 					cfg.Debug.ListenAddress,
 					cfg.Debug.ListenPort,
 				),
-				nil,
-			)
+				ReadHeaderTimeout: 60 * time.Second,
+			}
+			err := debugger.ListenAndServe()
 			if err != nil {
 				slog.Error(
 					fmt.Sprintf("failed to start debug listener: %s", err),
