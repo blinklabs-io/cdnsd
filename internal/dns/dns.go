@@ -1,4 +1,4 @@
-// Copyright 2024 Blink Labs Software
+// Copyright 2025 Blink Labs Software
 //
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file or at
@@ -9,7 +9,8 @@ package dns
 import (
 	"fmt"
 	"log/slog"
-	"math/rand"
+	"crypto/rand"
+	"math/big"
 	"net"
 	"os"
 	"strings"
@@ -326,7 +327,11 @@ func randomNameserverAddress(nameservers map[string][]net.IP) net.IP {
 		tmpNameservers = append(tmpNameservers, addresses...)
 	}
 	if len(tmpNameservers) > 0 {
-		tmpNameserver := tmpNameservers[rand.Intn(len(tmpNameservers))]
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(tmpNameservers))))
+		if err != nil {
+			return nil
+		}
+		tmpNameserver := tmpNameservers[n.Int64()]
 		return tmpNameserver
 	}
 	return nil
@@ -511,12 +516,20 @@ func randomNameserver(nameservers map[string][]net.IP) (string, string) {
 		mapKeys = append(mapKeys, k)
 	}
 	if len(mapKeys) > 0 {
-		randNsName := mapKeys[rand.Intn(len(mapKeys))]
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(mapKeys))))
+		if err != nil {
+			return "", ""
+		}
+		randNsName := mapKeys[n.Int64()]
 		randNsAddresses := nameservers[randNsName]
 		if randNsAddresses == nil {
 			return "", ""
 		}
-		randNsAddress := randNsAddresses[rand.Intn(len(randNsAddresses))].String()
+		n, err = rand.Int(rand.Reader, big.NewInt(int64(len(randNsAddresses))))
+		if err != nil {
+			return "", ""
+		}
+		randNsAddress := randNsAddresses[n.Int64()].String()
 		return randNsName, randNsAddress
 	}
 	return "", ""
@@ -531,9 +544,11 @@ func createQuery(recordName string, recordType uint16) *dns.Msg {
 
 func randomFallbackServer() string {
 	cfg := config.GetConfig()
-	return cfg.Dns.FallbackServers[rand.Intn(
-		len(cfg.Dns.FallbackServers),
-	)]
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(len(cfg.Dns.FallbackServers))))
+	if err != nil {
+		return ""
+	}
+	return cfg.Dns.FallbackServers[n.Int64()]
 }
 
 func formatMessageAnswerSection(section []dns.RR) string {
