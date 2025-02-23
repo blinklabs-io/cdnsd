@@ -1,4 +1,4 @@
-// Copyright 2024 Blink Labs Software
+// Copyright 2025 Blink Labs Software
 //
 // Use of this source code is governed by an MIT-style
 // license that can be found in the LICENSE file or at
@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"strings"
 	"time"
@@ -369,7 +370,10 @@ func (i *Indexer) handleEventOutputDns(
 				Rhs:  string(record.Rhs),
 			}
 			if record.Ttl.HasValue() {
-				tmpRecord.Ttl = int(record.Ttl.Value)
+				if record.Ttl.Value > math.MaxInt {
+					return fmt.Errorf("record ttl value out of bounds")
+				}
+				tmpRecord.Ttl = int(record.Ttl.Value) // #nosec G115
 			}
 			tmpRecords = append(tmpRecords, tmpRecord)
 		}
