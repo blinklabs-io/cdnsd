@@ -7,9 +7,9 @@
 package dns
 
 import (
+	"crypto/rand"
 	"fmt"
 	"log/slog"
-	"crypto/rand"
 	"math/big"
 	"net"
 	"os"
@@ -544,7 +544,10 @@ func createQuery(recordName string, recordType uint16) *dns.Msg {
 
 func randomFallbackServer() string {
 	cfg := config.GetConfig()
-	n, err := rand.Int(rand.Reader, big.NewInt(int64(len(cfg.Dns.FallbackServers))))
+	n, err := rand.Int(
+		rand.Reader,
+		big.NewInt(int64(len(cfg.Dns.FallbackServers))),
+	)
 	if err != nil {
 		return ""
 	}
