@@ -8,11 +8,13 @@ package dns
 
 import (
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/big"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/blinklabs-io/cdnsd/internal/config"
@@ -38,10 +40,7 @@ func Start() error {
 		cfg.Dns.ListenPort,
 	)
 	slog.Info(
-		fmt.Sprintf(
-			"starting DNS listener on %s",
-			listenAddr,
-		),
+		"starting DNS listener on " + listenAddr,
 	)
 	// Setup handler
 	dns.HandleFunc(".", handleQuery)
@@ -289,7 +288,7 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 func stateRecordToDnsRR(record state.DomainRecord) (dns.RR, error) {
 	tmpTtl := ""
 	if record.Ttl > 0 {
-		tmpTtl = fmt.Sprintf("%d", record.Ttl)
+		tmpTtl = strconv.Itoa(record.Ttl)
 	}
 	tmpRR := fmt.Sprintf(
 		"%s %s IN %s %s",
@@ -358,7 +357,7 @@ func doQuery(msg *dns.Msg, address string, recursive bool) (*dns.Msg, error) {
 		return nil, err
 	}
 	if resp == nil {
-		return nil, fmt.Errorf("dns response empty")
+		return nil, errors.New("dns response empty")
 	}
 	slog.Debug(
 		fmt.Sprintf(
