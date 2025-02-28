@@ -8,6 +8,7 @@ package indexer
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -371,7 +372,7 @@ func (i *Indexer) handleEventOutputDns(
 			}
 			if record.Ttl.HasValue() {
 				if record.Ttl.Value > math.MaxInt {
-					return fmt.Errorf("record ttl value out of bounds")
+					return errors.New("record ttl value out of bounds")
 				}
 				tmpRecord.Ttl = int(record.Ttl.Value) // #nosec G115
 			}
@@ -381,10 +382,7 @@ func (i *Indexer) handleEventOutputDns(
 			return err
 		}
 		slog.Info(
-			fmt.Sprintf(
-				"found updated registration for domain: %s",
-				domainName,
-			),
+			"found updated registration for domain: " + domainName,
 		)
 	}
 	return nil

@@ -113,10 +113,7 @@ func main() {
 			cfg.Metrics.ListenPort,
 		)
 		slog.Info(
-			fmt.Sprintf(
-				"starting listener for prometheus metrics connections on %s",
-				metricsListenAddr,
-			),
+			"starting listener for prometheus metrics connections on " + metricsListenAddr,
 		)
 		metricsMux := http.NewServeMux()
 		metricsMux.Handle("/metrics", promhttp.Handler())
