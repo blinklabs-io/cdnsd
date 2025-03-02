@@ -41,9 +41,9 @@ type DomainRecord struct {
 }
 
 type DiscoveredAddress struct {
-	Address  string
-	TldName  string
-	PolicyId string
+	Address  string `json:"address"`
+	TldName  string `json:"tld_name"`
+	PolicyId string `json:"policy_id"`
 }
 
 var globalState = &State{}
