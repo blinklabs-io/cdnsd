@@ -99,7 +99,7 @@ func (s *State) compareFingerprint() error {
 	err := s.db.Update(func(txn *badger.Txn) error {
 		item, err := txn.Get([]byte(fingerprintKey))
 		if err != nil {
-			if err == badger.ErrKeyNotFound {
+			if errors.Is(err, badger.ErrKeyNotFound) {
 				if err := txn.Set([]byte(fingerprintKey), []byte(fingerprint)); err != nil {
 					return err
 				}
@@ -162,7 +162,7 @@ func (s *State) GetCursor() (uint64, string, error) {
 		}
 		return nil
 	})
-	if err == badger.ErrKeyNotFound {
+	if errors.Is(err, badger.ErrKeyNotFound) {
 		return 0, "", nil
 	}
 	return slotNumber, blockHash, err
@@ -206,7 +206,7 @@ func (s *State) GetDiscoveredAddresses() ([]DiscoveredAddress, error) {
 		return nil
 	})
 	if err != nil {
-		if err != badger.ErrKeyNotFound {
+		if !errors.Is(err, badger.ErrKeyNotFound) {
 			return ret, err
 		}
 	}
