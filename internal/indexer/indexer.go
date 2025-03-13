@@ -16,23 +16,22 @@ import (
 	"strings"
 	"time"
 
-	"github.com/blinklabs-io/cdnsd/internal/config"
-	"github.com/blinklabs-io/cdnsd/internal/logging"
-	"github.com/blinklabs-io/cdnsd/internal/state"
-	ouroboros "github.com/blinklabs-io/gouroboros"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
-
 	"github.com/blinklabs-io/adder/event"
 	filter_event "github.com/blinklabs-io/adder/filter/event"
 	input_chainsync "github.com/blinklabs-io/adder/input/chainsync"
 	output_embedded "github.com/blinklabs-io/adder/output/embedded"
 	"github.com/blinklabs-io/adder/pipeline"
 	models "github.com/blinklabs-io/cardano-models"
+	"github.com/blinklabs-io/cdnsd/internal/config"
+	"github.com/blinklabs-io/cdnsd/internal/logging"
+	"github.com/blinklabs-io/cdnsd/internal/state"
+	ouroboros "github.com/blinklabs-io/gouroboros"
 	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/blinklabs-io/gouroboros/ledger"
 	ocommon "github.com/blinklabs-io/gouroboros/protocol/common"
 	"github.com/miekg/dns"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 const (

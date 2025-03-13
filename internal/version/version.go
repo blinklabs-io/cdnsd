@@ -11,8 +11,10 @@ import (
 )
 
 // These are populated at build time
-var Version string
-var CommitHash string
+var (
+	Version    string
+	CommitHash string
+)
 
 func GetVersionString() string {
 	if Version != "" {

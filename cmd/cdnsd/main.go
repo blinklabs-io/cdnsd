@@ -11,14 +11,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
-	"time"
-
 	// #nosec G108
 	_ "net/http/pprof"
-
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"go.uber.org/automaxprocs/maxprocs"
+	"os"
+	"time"
 
 	"github.com/blinklabs-io/cdnsd/internal/config"
 	"github.com/blinklabs-io/cdnsd/internal/dns"
@@ -26,6 +22,8 @@ import (
 	"github.com/blinklabs-io/cdnsd/internal/logging"
 	"github.com/blinklabs-io/cdnsd/internal/state"
 	"github.com/blinklabs-io/cdnsd/internal/version"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.uber.org/automaxprocs/maxprocs"
 )
 
 var cmdlineFlags struct {

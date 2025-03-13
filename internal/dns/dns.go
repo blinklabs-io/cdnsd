@@ -19,18 +19,15 @@ import (
 
 	"github.com/blinklabs-io/cdnsd/internal/config"
 	"github.com/blinklabs-io/cdnsd/internal/state"
-
 	"github.com/miekg/dns"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
-var (
-	metricQueryTotal = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "dns_query_total",
-		Help: "total DNS queries handled",
-	})
-)
+var metricQueryTotal = promauto.NewCounter(prometheus.CounterOpts{
+	Name: "dns_query_total",
+	Help: "total DNS queries handled",
+})
 
 func Start() error {
 	cfg := config.GetConfig()
