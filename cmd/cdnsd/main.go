@@ -11,8 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	// #nosec G108
-	_ "net/http/pprof"
+	_ "net/http/pprof" // #nosec G108
 	"os"
 	"time"
 
