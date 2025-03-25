@@ -5,7 +5,7 @@ go 1.23.6
 require (
 	github.com/blinklabs-io/adder v0.26.0
 	github.com/blinklabs-io/cardano-models v0.5.0
-	github.com/blinklabs-io/gouroboros v0.113.1
+	github.com/blinklabs-io/gouroboros v0.114.1
 	github.com/dgraph-io/badger/v4 v4.6.0
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/miekg/dns v1.1.63
