@@ -302,7 +302,7 @@ func copyResponse(req *dns.Msg, srcResp *dns.Msg, destResp *dns.Msg) {
 		return
 	}
 	// Copy relevant data from original request and source response into destination response
-	destResp.SetRcode(req, srcResp.MsgHdr.Rcode)
+	destResp.SetRcode(req, srcResp.Rcode)
 	destResp.RecursionDesired = req.RecursionDesired
 	destResp.RecursionAvailable = srcResp.RecursionAvailable
 	if srcResp.Ns != nil {
