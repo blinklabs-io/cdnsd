@@ -95,7 +95,7 @@ func TestDecodeHandshakeBlock(t *testing.T) {
 							Version: 0,
 							Hash:    decodeHex("5ad99a3052017938562ede6e228b68ca50c14663"),
 						},
-						Covenant: handshake.Covenant{
+						Covenant: handshake.GenericCovenant{
 							Type: 8,
 							Items: [][]byte{
 								decodeHex("c89c49ce327748244702f481f35097199cca2f7c2549a33ecacbdf973690e534"),
