@@ -99,7 +99,7 @@ func (i *TransactionInput) DecodeWitness(r io.Reader) error {
 type TransactionOutput struct {
 	Value    uint64
 	Address  Address
-	Covenant Covenant
+	Covenant GenericCovenant
 }
 
 func (o *TransactionOutput) Decode(r io.Reader) error {
@@ -151,33 +151,6 @@ func (a *Address) Decode(r io.Reader) error {
 	a.Hash = make([]byte, hashSize)
 	if err := binary.Read(r, binary.LittleEndian, &a.Hash); err != nil {
 		return err
-	}
-	return nil
-}
-
-type Covenant struct {
-	Type  uint8
-	Items [][]byte
-}
-
-func (c *Covenant) Decode(r io.Reader) error {
-	if err := binary.Read(r, binary.LittleEndian, &c.Type); err != nil {
-		return err
-	}
-	itemCount, err := binary.ReadUvarint(r.(io.ByteReader))
-	if err != nil {
-		return err
-	}
-	for i := uint64(0); i < itemCount; i++ {
-		itemLength, err := binary.ReadUvarint(r.(io.ByteReader))
-		if err != nil {
-			return err
-		}
-		item := make([]byte, itemLength)
-		if err := binary.Read(r, binary.LittleEndian, &item); err != nil {
-			return err
-		}
-		c.Items = append(c.Items, item)
 	}
 	return nil
 }
