@@ -5,9 +5,9 @@ go 1.23.6
 toolchain go1.24.1
 
 require (
-	github.com/blinklabs-io/adder v0.27.0
+	github.com/blinklabs-io/adder v0.28.0
 	github.com/blinklabs-io/cardano-models v0.5.0
-	github.com/blinklabs-io/gouroboros v0.115.2
+	github.com/blinklabs-io/gouroboros v0.116.0
 	github.com/dgraph-io/badger/v4 v4.7.0
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/miekg/dns v1.1.65
@@ -27,7 +27,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dgraph-io/ristretto/v2 v2.2.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
+	github.com/fxamacker/cbor/v2 v2.8.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.8 // indirect
 	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
