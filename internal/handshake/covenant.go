@@ -89,7 +89,9 @@ type RegisterCovenant struct {
 
 func (RegisterCovenant) isCovenant() {}
 
-func NewRegisterCovenantFromGeneric(gc *GenericCovenant) (*RegisterCovenant, error) {
+func NewRegisterCovenantFromGeneric(
+	gc *GenericCovenant,
+) (*RegisterCovenant, error) {
 	if gc.Type != CovenantTypeRegister {
 		return nil, errors.New("wrong covenant type")
 	}
@@ -123,7 +125,9 @@ type UpdateCovenant struct {
 
 func (UpdateCovenant) isCovenant() {}
 
-func NewUpdateCovenantFromGeneric(gc *GenericCovenant) (*UpdateCovenant, error) {
+func NewUpdateCovenantFromGeneric(
+	gc *GenericCovenant,
+) (*UpdateCovenant, error) {
 	if gc.Type != CovenantTypeUpdate {
 		return nil, errors.New("wrong covenant type")
 	}
