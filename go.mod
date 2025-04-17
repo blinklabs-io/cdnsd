@@ -13,8 +13,13 @@ require (
 	github.com/miekg/dns v1.1.65
 	github.com/prometheus/client_golang v1.22.0
 	go.uber.org/automaxprocs v1.6.0
+	golang.org/x/crypto v0.36.0
 	gopkg.in/yaml.v2 v2.4.0
 )
+
+replace github.com/wealdtechgo/go-merkletree => ./internal/handshake/merkletree
+
+replace github.com/wealdtechgo/go-merkletree/v2 => ./internal/handshake/merkletree
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
@@ -50,7 +55,6 @@ require (
 	go.opentelemetry.io/otel v1.35.0 // indirect
 	go.opentelemetry.io/otel/metric v1.35.0 // indirect
 	go.opentelemetry.io/otel/trace v1.35.0 // indirect
-	golang.org/x/crypto v0.36.0 // indirect
 	golang.org/x/mod v0.23.0 // indirect
 	golang.org/x/net v0.38.0 // indirect
 	golang.org/x/sync v0.12.0 // indirect
