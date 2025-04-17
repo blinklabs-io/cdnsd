@@ -7,25 +7,49 @@
 package handshake
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"io"
+
+	"golang.org/x/crypto/blake2b"
 )
 
 type Transaction struct {
-	Version  uint32
-	Inputs   []TransactionInput
-	Outputs  []TransactionOutput
-	LockTime uint32
+	Version     uint32
+	Inputs      []TransactionInput
+	Outputs     []TransactionOutput
+	LockTime    uint32
+	hash        []byte
+	witnessHash []byte
 }
 
-func (t *Transaction) Decode(r io.Reader) error {
-	var err error
-	if err = binary.Read(r, binary.LittleEndian, &t.Version); err != nil {
+func NewTransactionFromReader(r io.Reader) (*Transaction, error) {
+	// Read entire input into a bytes.Buffer
+	tmpData, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+	buf := bytes.NewBuffer(tmpData)
+	// Decode TX
+	var tmpTransaction Transaction
+	if err := tmpTransaction.Decode(buf); err != nil {
+		return nil, err
+	}
+	return &tmpTransaction, err
+}
+
+func (t *Transaction) Decode(r *bytes.Buffer) error {
+	// Save original buffer
+	// This is needed to capture TX bytes
+	origData := make([]byte, r.Len())
+	copy(origData, r.Bytes())
+	// Version
+	if err := binary.Read(r, binary.LittleEndian, &t.Version); err != nil {
 		return err
 	}
 	// Inputs
-	inCount, err := binary.ReadUvarint(r.(io.ByteReader))
+	inCount, err := binary.ReadUvarint(r)
 	if err != nil {
 		return err
 	}
@@ -37,7 +61,7 @@ func (t *Transaction) Decode(r io.Reader) error {
 		t.Inputs = append(t.Inputs, tmpInput)
 	}
 	// Outputs
-	outCount, err := binary.ReadUvarint(r.(io.ByteReader))
+	outCount, err := binary.ReadUvarint(r)
 	if err != nil {
 		return err
 	}
@@ -52,13 +76,47 @@ func (t *Transaction) Decode(r io.Reader) error {
 	if err := binary.Read(r, binary.LittleEndian, &t.LockTime); err != nil {
 		return err
 	}
+	// Capture original TX bytes
+	txBytes := origData[:len(origData)-r.Len()]
+	// Generate TX hash
+	tmpHash := blake2b.Sum256(txBytes)
+	t.hash = make([]byte, len(tmpHash))
+	copy(t.hash, tmpHash[:])
+	// Save remaining data
+	// This is needed for capturing the witness data bytes
+	origData = make([]byte, r.Len())
+	copy(origData, r.Bytes())
 	// Witnesses
 	for i := uint64(0); i < inCount; i++ {
 		if err := t.Inputs[i].DecodeWitness(r); err != nil {
 			return err
 		}
 	}
+	// Capture original bytes for witness data
+	witnessDataBytes := origData[:len(origData)-r.Len()]
+	// Generate witness data hash
+	witnessDataHash := blake2b.Sum256(witnessDataBytes)
+	// Generate TX hash with witness data
+	h, err := blake2b.New256(nil)
+	if err != nil {
+		return err
+	}
+	h.Write(t.hash)
+	h.Write(witnessDataHash[:])
+	t.witnessHash = h.Sum(nil)
 	return nil
+}
+
+func (t *Transaction) Hash() []byte {
+	ret := make([]byte, len(t.hash))
+	copy(ret, t.hash)
+	return ret
+}
+
+func (t *Transaction) WitnessHash() []byte {
+	ret := make([]byte, len(t.witnessHash))
+	copy(ret, t.witnessHash)
+	return ret
 }
 
 type TransactionInput struct {
@@ -67,7 +125,7 @@ type TransactionInput struct {
 	Witness      [][]byte
 }
 
-func (i *TransactionInput) Decode(r io.Reader) error {
+func (i *TransactionInput) Decode(r *bytes.Buffer) error {
 	if err := i.PrevOutpoint.Decode(r); err != nil {
 		return err
 	}
@@ -102,7 +160,7 @@ type TransactionOutput struct {
 	Covenant GenericCovenant
 }
 
-func (o *TransactionOutput) Decode(r io.Reader) error {
+func (o *TransactionOutput) Decode(r *bytes.Buffer) error {
 	if err := binary.Read(r, binary.LittleEndian, &o.Value); err != nil {
 		return err
 	}
@@ -120,7 +178,7 @@ type Outpoint struct {
 	Index uint32
 }
 
-func (o *Outpoint) Decode(r io.Reader) error {
+func (o *Outpoint) Decode(r *bytes.Buffer) error {
 	return binary.Read(r, binary.LittleEndian, o)
 }
 
@@ -129,7 +187,7 @@ type Address struct {
 	Hash    []byte
 }
 
-func (a *Address) Decode(r io.Reader) error {
+func (a *Address) Decode(r *bytes.Buffer) error {
 	if err := binary.Read(r, binary.LittleEndian, &a.Version); err != nil {
 		return err
 	}
