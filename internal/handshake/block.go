@@ -7,6 +7,7 @@
 package handshake
 
 import (
+	"bytes"
 	"encoding/binary"
 	"io"
 )
@@ -16,13 +17,28 @@ type Block struct {
 	Transactions []Transaction
 }
 
-func (b *Block) Decode(r io.Reader) error {
+func NewBlockFromReader(r io.Reader) (*Block, error) {
+	// Read entire input into a bytes.Buffer
+	tmpData, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+	buf := bytes.NewBuffer(tmpData)
+	// Decode block
+	var tmpBlock Block
+	if err := tmpBlock.Decode(buf); err != nil {
+		return nil, err
+	}
+	return &tmpBlock, err
+}
+
+func (b *Block) Decode(r *bytes.Buffer) error {
 	// Decode header
 	if err := b.Header.Decode(r); err != nil {
 		return err
 	}
 	// Transactions
-	txCount, err := binary.ReadUvarint(r.(io.ByteReader))
+	txCount, err := binary.ReadUvarint(r)
 	if err != nil {
 		return err
 	}

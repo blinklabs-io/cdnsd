@@ -120,8 +120,7 @@ func TestDecodeHandshakeBlock(t *testing.T) {
 		t.Fatalf("unexpected error: %s", err)
 	}
 	br := bytes.NewReader(testBlockBytes)
-	var block handshake.Block
-	err = block.Decode(br)
+	block, err := handshake.NewBlockFromReader(br)
 	if err != nil {
 		t.Fatalf("unexpected error deserializing block: %s", err)
 	}
