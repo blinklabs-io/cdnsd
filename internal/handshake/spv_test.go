@@ -20,8 +20,12 @@ func TestVerifySpvProof(t *testing.T) {
 	}{
 		// Domain "name"
 		{
-			root: decodeHex("5174d1e0d32c4a31b79c71f4e9e26904a813ec19a76087758f71e99f9f90e393"),
-			key:  decodeHex("859cbd19b98e068fe07e440cb69f824d74fc8d5715f272d6dccf464fe0aa6c71"),
+			root: decodeHex(
+				"5174d1e0d32c4a31b79c71f4e9e26904a813ec19a76087758f71e99f9f90e393",
+			),
+			key: decodeHex(
+				"859cbd19b98e068fe07e440cb69f824d74fc8d5715f272d6dccf464fe0aa6c71",
+			),
 			proofJson: `
 			{
 			      "type": "TYPE_SHORT",
@@ -123,8 +127,12 @@ func TestVerifySpvProof(t *testing.T) {
 		},
 		// Domain "trees"
 		{
-			root: decodeHex("5174d1e0d32c4a31b79c71f4e9e26904a813ec19a76087758f71e99f9f90e393"),
-			key:  decodeHex("92ec68524dbcc44bc3ff4847ed45e3a86789009d862499ce558c793498413cec"),
+			root: decodeHex(
+				"5174d1e0d32c4a31b79c71f4e9e26904a813ec19a76087758f71e99f9f90e393",
+			),
+			key: decodeHex(
+				"92ec68524dbcc44bc3ff4847ed45e3a86789009d862499ce558c793498413cec",
+			),
 			proofJson: `
 			{
 			      "type": "TYPE_EXISTS",
@@ -244,8 +252,12 @@ func TestVerifySpvProof(t *testing.T) {
 		},
 		// Domain "blinklabs"
 		{
-			root: decodeHex("5174d1e0d32c4a31b79c71f4e9e26904a813ec19a76087758f71e99f9f90e393"),
-			key:  decodeHex("66d0eae73152781048a2d83dd103a6dc155d162e72fba88d055f32d99580cef8"),
+			root: decodeHex(
+				"5174d1e0d32c4a31b79c71f4e9e26904a813ec19a76087758f71e99f9f90e393",
+			),
+			key: decodeHex(
+				"66d0eae73152781048a2d83dd103a6dc155d162e72fba88d055f32d99580cef8",
+			),
 			proofJson: `
 			{
 			      "type": "TYPE_EXISTS",

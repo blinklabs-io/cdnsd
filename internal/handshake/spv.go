@@ -228,7 +228,12 @@ func (p *Proof) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (p *Proof) hashInternal(prefix []byte, prefixSize uint16, left []byte, right []byte) []byte {
+func (p *Proof) hashInternal(
+	prefix []byte,
+	prefixSize uint16,
+	left []byte,
+	right []byte,
+) []byte {
 	h, _ := blake2b.New256(nil)
 	if len(prefix) == 0 {
 		h.Write(ProofInternal)
@@ -261,7 +266,12 @@ func (p *Proof) hashValue(key []byte, value []byte) []byte {
 	return p.hashLeaf(key, tmpSum)
 }
 
-func (p *Proof) has(prefix []byte, prefixSize uint16, key []byte, depth uint16) bool {
+func (p *Proof) has(
+	prefix []byte,
+	prefixSize uint16,
+	key []byte,
+	depth uint16,
+) bool {
 	tmpLen := min(
 		prefixSize,
 		uint16(256-depth),
@@ -337,7 +347,10 @@ func (p *Proof) Verify(
 		}
 		depth -= 1
 		if hasBit(key, int(depth)) {
-			copy(next, p.hashInternal(item.Prefix, item.PrefixSize, item.Node, next))
+			copy(
+				next,
+				p.hashInternal(item.Prefix, item.PrefixSize, item.Node, next),
+			)
 		} else {
 			copy(next, p.hashInternal(item.Prefix, item.PrefixSize, next, item.Node))
 		}
