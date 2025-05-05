@@ -139,7 +139,8 @@ func (i *Indexer) Start() error {
 				}
 			},
 		),
-		input_chainsync.WithBulkMode(true),
+		// TODO: re-enable this after https://github.com/blinklabs-io/adder/issues/412 is fixed
+		// input_chainsync.WithBulkMode(true),
 		input_chainsync.WithAutoReconnect(true),
 		input_chainsync.WithLogger(logging.GetLogger()),
 	}
