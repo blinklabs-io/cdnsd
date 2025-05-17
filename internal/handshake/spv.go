@@ -106,7 +106,7 @@ func (p *Proof) Decode(r *bytes.Buffer) error {
 		return err
 	}
 	p.Nodes = make([]ProofNode, count)
-	for i := 0; i < int(count); i++ {
+	for i := range int(count) {
 		item := &ProofNode{}
 		if hasBit(bitMap, i) {
 			bits, bytes, err := readBitlen(r)
@@ -279,7 +279,7 @@ func (p *Proof) has(
 	x := 0
 	y := depth
 	var c uint16
-	for i := 0; i < int(tmpLen); i++ {
+	for range int(tmpLen) {
 		if hasBit(prefix, int(x)) != hasBit(key, int(y)) {
 			break
 		}
