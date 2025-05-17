@@ -6,6 +6,8 @@
 
 package config
 
+import "slices"
+
 type Profile struct {
 	Network          string // Cardano network name
 	Tld              string // Top-level domain
@@ -19,11 +21,8 @@ type Profile struct {
 func GetProfiles() []Profile {
 	var ret []Profile
 	for k, profile := range Profiles {
-		for _, tmpProfile := range globalConfig.Profiles {
-			if k == tmpProfile {
-				ret = append(ret, profile)
-				break
-			}
+		if slices.Contains(globalConfig.Profiles, k) {
+			ret = append(ret, profile)
 		}
 	}
 	return ret
