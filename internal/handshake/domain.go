@@ -246,7 +246,7 @@ func (t *TextDomainRecord) decode(r *BytesReader) error {
 		return err
 	}
 	var size uint8
-	for i := 0; i < int(length); i++ {
+	for range int(length) {
 		// Read item size
 		if err := binary.Read(r, binary.LittleEndian, &size); err != nil {
 			return err
@@ -297,7 +297,7 @@ func domainRecordNameDecode(r *BytesReader) (string, error) {
 			if c > DnsMaxLabel {
 				return "", errors.New("label too long")
 			}
-			for j := 0; j < int(c); j++ {
+			for range int(c) {
 				b, err := r.ReadByte()
 				if err != nil {
 					return "", err
@@ -329,7 +329,7 @@ func domainRecordNameDecode(r *BytesReader) (string, error) {
 			data := r.OriginalBytes()
 			r = NewBytesReader(data)
 			// Read and discard bytes until we reach the calculated offset
-			for j := 0; j < offset; j++ {
+			for range offset {
 				if _, err := r.ReadByte(); err != nil {
 					return "", err
 				}
