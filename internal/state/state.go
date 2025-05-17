@@ -248,7 +248,7 @@ func (s *State) UpdateDomain(
 			)
 		}
 		// Delete old records in tracking key that are no longer present after this update
-		domainRecordsKey := []byte(fmt.Sprintf("d_%s_records", domainName))
+		domainRecordsKey := fmt.Appendf(nil, "d_%s_records", domainName)
 		domainRecordsItem, err := txn.Get(domainRecordsKey)
 		if err != nil {
 			if !errors.Is(err, badger.ErrKeyNotFound) {
@@ -289,13 +289,13 @@ func (s *State) LookupRecords(
 	recordName = strings.Trim(recordName, `.`)
 	err := s.db.View(func(txn *badger.Txn) error {
 		for _, recordType := range recordTypes {
-			keyPrefix := []byte(
-				fmt.Sprintf(
-					"r_%s_%s_",
-					strings.ToUpper(recordType),
-					recordName,
-				),
+			keyPrefix := fmt.Appendf(
+				nil,
+				"r_%s_%s_",
+				strings.ToUpper(recordType),
+				recordName,
 			)
+
 			it := txn.NewIterator(badger.DefaultIteratorOptions)
 			defer it.Close()
 			for it.Seek(keyPrefix); it.ValidForPrefix(keyPrefix); it.Next() {
