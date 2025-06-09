@@ -5,15 +5,15 @@ go 1.23.6
 toolchain go1.24.1
 
 require (
-	github.com/blinklabs-io/adder v0.30.1
+	github.com/blinklabs-io/adder v0.30.2
 	github.com/blinklabs-io/cardano-models v0.5.1
-	github.com/blinklabs-io/gouroboros v0.122.0
+	github.com/blinklabs-io/gouroboros v0.123.0
 	github.com/dgraph-io/badger/v4 v4.7.0
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/miekg/dns v1.1.66
 	github.com/prometheus/client_golang v1.22.0
 	go.uber.org/automaxprocs v1.6.0
-	golang.org/x/crypto v0.38.0
+	golang.org/x/crypto v0.39.0
 	gopkg.in/yaml.v2 v2.4.0
 )
 
@@ -51,11 +51,11 @@ require (
 	go.opentelemetry.io/otel v1.35.0 // indirect
 	go.opentelemetry.io/otel/metric v1.35.0 // indirect
 	go.opentelemetry.io/otel/trace v1.35.0 // indirect
-	golang.org/x/mod v0.24.0 // indirect
-	golang.org/x/net v0.39.0 // indirect
-	golang.org/x/sync v0.14.0 // indirect
+	golang.org/x/mod v0.25.0 // indirect
+	golang.org/x/net v0.40.0 // indirect
+	golang.org/x/sync v0.15.0 // indirect
 	golang.org/x/sys v0.33.0 // indirect
-	golang.org/x/text v0.25.0 // indirect
-	golang.org/x/tools v0.32.0 // indirect
+	golang.org/x/text v0.26.0 // indirect
+	golang.org/x/tools v0.33.0 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect
 )
