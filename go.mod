@@ -5,7 +5,7 @@ go 1.23.6
 toolchain go1.24.4
 
 require (
-	github.com/blinklabs-io/adder v0.30.2
+	github.com/blinklabs-io/adder v0.30.3
 	github.com/blinklabs-io/cardano-models v0.5.1
 	github.com/blinklabs-io/gouroboros v0.125.1
 	github.com/dgraph-io/badger/v4 v4.7.0
@@ -19,11 +19,12 @@ require (
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
-	github.com/SundaeSwap-finance/kugo v1.2.0 // indirect
-	github.com/SundaeSwap-finance/ogmigo/v6 v6.0.1 // indirect
+	github.com/SundaeSwap-finance/kugo v1.3.0 // indirect
+	github.com/SundaeSwap-finance/ogmigo/v6 v6.0.2 // indirect
 	github.com/aws/aws-sdk-go v1.55.6 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/btcsuite/btcd/btcutil v1.1.6 // indirect
+	github.com/btcsuite/btcutil v1.0.2 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dgraph-io/ristretto/v2 v2.2.0 // indirect
