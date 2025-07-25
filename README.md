@@ -1,2 +1,3 @@
 # cdnsd
-Resolver for .cardano Handshake domains
+
+Resolver for Cardano-based second-level domains on Handshake top-level domains
