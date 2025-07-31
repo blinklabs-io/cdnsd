@@ -126,6 +126,7 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 		if records != nil {
 			// Assemble response
 			m.SetReply(r)
+			m.Authoritative = true
 			for _, tmpRecord := range records {
 				tmpRR, err := stateRecordToDnsRR(tmpRecord)
 				if err != nil {
