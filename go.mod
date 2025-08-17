@@ -1,19 +1,19 @@
 module github.com/blinklabs-io/cdnsd
 
-go 1.23.6
+go 1.24.0
 
 toolchain go1.24.4
 
 require (
 	github.com/blinklabs-io/adder v0.30.5
 	github.com/blinklabs-io/cardano-models v0.5.1
-	github.com/blinklabs-io/gouroboros v0.128.2
+	github.com/blinklabs-io/gouroboros v0.131.0
 	github.com/dgraph-io/badger/v4 v4.8.0
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/miekg/dns v1.1.68
 	github.com/prometheus/client_golang v1.23.0
 	go.uber.org/automaxprocs v1.6.0
-	golang.org/x/crypto v0.40.0
+	golang.org/x/crypto v0.41.0
 	gopkg.in/yaml.v2 v2.4.0
 )
 
@@ -23,13 +23,14 @@ require (
 	github.com/SundaeSwap-finance/ogmigo/v6 v6.0.2 // indirect
 	github.com/aws/aws-sdk-go v1.55.6 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
+	github.com/blinklabs-io/plutigo v0.0.4 // indirect
 	github.com/btcsuite/btcd/btcutil v1.1.6 // indirect
 	github.com/btcsuite/btcutil v1.0.2 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dgraph-io/ristretto/v2 v2.2.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/fxamacker/cbor/v2 v2.8.0 // indirect
+	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.8 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
@@ -52,11 +53,11 @@ require (
 	go.opentelemetry.io/otel v1.37.0 // indirect
 	go.opentelemetry.io/otel/metric v1.37.0 // indirect
 	go.opentelemetry.io/otel/trace v1.37.0 // indirect
-	golang.org/x/mod v0.25.0 // indirect
-	golang.org/x/net v0.41.0 // indirect
+	golang.org/x/mod v0.26.0 // indirect
+	golang.org/x/net v0.42.0 // indirect
 	golang.org/x/sync v0.16.0 // indirect
-	golang.org/x/sys v0.34.0 // indirect
-	golang.org/x/text v0.27.0 // indirect
-	golang.org/x/tools v0.34.0 // indirect
+	golang.org/x/sys v0.35.0 // indirect
+	golang.org/x/text v0.28.0 // indirect
+	golang.org/x/tools v0.35.0 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect
 )
