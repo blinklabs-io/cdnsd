@@ -6,7 +6,13 @@ import (
 	"strings"
 )
 
+// go:embed genesis-data.json
 var raw []byte
+
+var (
+	Main     Net
+	Maindata string
+)
 
 type netDisk struct {
 	Version      uint32 `json:"version"`
@@ -48,9 +54,6 @@ type Net struct {
 	Magic        uint32
 	DataB64      string
 }
-
-var Main Net
-var Maindata string
 
 func mustParseBits(s string) uint32 {
 	if strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X") {
