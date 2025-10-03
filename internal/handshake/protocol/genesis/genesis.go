@@ -6,7 +6,6 @@ import (
 	"strings"
 )
 
-// go:embed genesis-data.json
 var raw []byte
 
 var (
