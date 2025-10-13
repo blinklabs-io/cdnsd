@@ -508,13 +508,15 @@ func Get(t NetworkType) *Network {
 	return SelectNetwork(t)
 }
 
-// Ensure returns t if known, else returns Primary()
-func Ensure(t *Network) *Network {
-	if t != nil {
-		return t
+// Ensure returns n if known, else returns Primary()
+func Ensure(n *Network) *Network {
+	if n != nil {
+		return n
 	}
 	return Primary()
 }
+
+// Lookups helper functions
 
 // FromMagic finds a network by magic number.
 func FromMagic(magic uint32, prefer ...NetworkType) *Network {
@@ -637,4 +639,9 @@ func FromAddress(hrp string, prefer ...NetworkType) *Network {
 
 func (n *Network) String() string {
 	return n.Type
+}
+
+// Types lists all supported network type constants.
+func Types() []NetworkType {
+	return []NetworkType{Mainnet, Testnet, Regtest, Simnet}
 }
