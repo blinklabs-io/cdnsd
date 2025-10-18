@@ -219,17 +219,6 @@ func bi(hex string) *big.Int {
 	return n
 }
 
-var Networks = map[NetworkType]*Network{
-	Mainnet: mainNet(),
-	Testnet: testNet(),
-	Regtest: regTest(),
-	Simnet:  simNet(),
-}
-
-func SelectNetwork(t NetworkType) *Network {
-	return Networks[t]
-}
-
 func testNet() *Network {
 	const (
 		targetSpacing = uint32(10 * 60)
@@ -633,4 +622,178 @@ func regTest() *Network {
 func simNet() *Network {
 	// Need to implement
 	return &Network{}
+}
+
+var Networks = map[NetworkType]*Network{
+	Mainnet: mainNet(),
+	Testnet: testNet(),
+	Regtest: regTest(),
+	Simnet:  simNet(),
+}
+
+func SelectNetwork(t NetworkType) *Network {
+	return Networks[t]
+}
+
+var primary *Network
+
+// SetPrimary sets the default/primary network.
+func SetPrimary(t NetworkType) *Network {
+	n := SelectNetwork(t)
+	if n == nil {
+		panic("protocol: unknown network: " + string(t))
+	}
+	primary = n
+	return n
+}
+
+// Primary returns the default network and defaults to mainnet
+func Primary() *Network {
+	if primary == nil {
+		return SetPrimary(Mainnet)
+	}
+	return primary
+}
+
+// Get returns a network by type (nil if unknown)
+func Get(t NetworkType) *Network {
+	return SelectNetwork(t)
+}
+
+// Ensure returns n if known, else returns Primary()
+func Ensure(n *Network) *Network {
+	if n != nil {
+		return n
+	}
+	return Primary()
+}
+
+// Lookups helper functions
+
+// FromMagic finds a network by magic number.
+func FromMagic(magic uint32, prefer ...NetworkType) *Network {
+	if len(prefer) > 0 {
+		n := SelectNetwork(prefer[0])
+		if n != nil && n.Magic == magic {
+			return n
+		}
+		return nil
+	}
+	for _, n := range Networks {
+		if n != nil && n.Magic == magic {
+			return n
+		}
+	}
+	return nil
+}
+
+// FromWIF finds a network by WIF prefix.
+func FromWIF(prefix uint32, prefer ...NetworkType) *Network {
+	if len(prefer) > 0 {
+		n := SelectNetwork(prefer[0])
+		if n != nil && n.KeyPrefix.Privkey == prefix {
+			return n
+		}
+		return nil
+	}
+	for _, n := range Networks {
+		if n != nil && n.KeyPrefix.Privkey == prefix {
+			return n
+		}
+	}
+	return nil
+}
+
+// FromPublic finds a network by xpubkey prefix.
+func FromPublic(prefix uint32, prefer ...NetworkType) *Network {
+	if len(prefer) > 0 {
+		n := SelectNetwork(prefer[0])
+		if n != nil && n.KeyPrefix.XPubKey == prefix {
+			return n
+		}
+		return nil
+	}
+	for _, n := range Networks {
+		if n != nil && n.KeyPrefix.XPubKey == prefix {
+			return n
+		}
+	}
+	return nil
+}
+
+// FromPrivate finds a network by its xprivkey prefix.
+func FromPrivate(prefix uint32, prefer ...NetworkType) *Network {
+	if len(prefer) > 0 {
+		n := SelectNetwork(prefer[0])
+		if n != nil && n.KeyPrefix.XPrivKey == prefix {
+			return n
+		}
+		return nil
+	}
+	for _, n := range Networks {
+		if n != nil && n.KeyPrefix.XPrivKey == prefix {
+			return n
+		}
+	}
+	return nil
+}
+
+// FromPublic58 finds a network by its xpubkey base58 prefix.
+func FromPublic58(prefix string, prefer ...NetworkType) *Network {
+	if len(prefer) > 0 {
+		n := SelectNetwork(prefer[0])
+		if n != nil && n.KeyPrefix.XPubKey58 == prefix {
+			return n
+		}
+		return nil
+	}
+	for _, n := range Networks {
+		if n != nil && n.KeyPrefix.XPubKey58 == prefix {
+			return n
+		}
+	}
+	return nil
+}
+
+// FromPrivate58 finds a network by its xprivkey base58 prefix.
+func FromPrivate58(prefix string, prefer ...NetworkType) *Network {
+	if len(prefer) > 0 {
+		n := SelectNetwork(prefer[0])
+		if n != nil && n.KeyPrefix.XPrivKey58 == prefix {
+			return n
+		}
+		return nil
+	}
+	for _, n := range Networks {
+		if n != nil && n.KeyPrefix.XPrivKey58 == prefix {
+			return n
+		}
+	}
+	return nil
+}
+
+// FromAddress finds a network by its bech32 address prefix.
+func FromAddress(hrp string, prefer ...NetworkType) *Network {
+	if len(prefer) > 0 {
+		n := SelectNetwork(prefer[0])
+		if n != nil && n.AddressPrefix == hrp {
+			return n
+		}
+		return nil
+	}
+	for _, n := range Networks {
+		if n != nil && n.AddressPrefix == hrp {
+			return n
+		}
+	}
+	return nil
+}
+
+func (n *Network) String() string {
+	return n.Type
+}
+
+// Types lists all supported network type constants.
+func Types() []NetworkType {
+	return []NetworkType{Mainnet, Testnet, Regtest, Simnet}
 }
