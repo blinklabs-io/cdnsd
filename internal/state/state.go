@@ -259,8 +259,8 @@ func (s *State) UpdateDomain(
 			if err != nil {
 				return err
 			}
-			domainRecordsSplit := strings.Split(string(domainRecordsVal), ",")
-			for _, tmpRecordKey := range domainRecordsSplit {
+			domainRecordsSplit := strings.SplitSeq(string(domainRecordsVal), ",")
+			for tmpRecordKey := range domainRecordsSplit {
 				if tmpRecordKey == "" {
 					continue
 				}
