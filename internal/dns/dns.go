@@ -552,9 +552,10 @@ func randomFallbackServer() string {
 }
 
 func formatMessageAnswerSection(section []dns.RR) string {
-	ret := "[ "
+	var ret strings.Builder
+	ret.WriteString("[ ")
 	for idx, rr := range section {
-		ret += fmt.Sprintf(
+		ret.WriteString(fmt.Sprintf(
 			"< %s >",
 			strings.ReplaceAll(
 				strings.TrimPrefix(
@@ -564,20 +565,21 @@ func formatMessageAnswerSection(section []dns.RR) string {
 				"\t",
 				" ",
 			),
-		)
+		))
 		if idx != len(section)-1 {
-			ret += `,`
+			ret.WriteString(`,`)
 		}
-		ret += ` `
+		ret.WriteString(` `)
 	}
-	ret += "]"
-	return ret
+	ret.WriteString("]")
+	return ret.String()
 }
 
 func formatMessageQuestionSection(section []dns.Question) string {
-	ret := "[ "
+	var ret strings.Builder
+	ret.WriteString("[ ")
 	for idx, question := range section {
-		ret += fmt.Sprintf(
+		ret.WriteString(fmt.Sprintf(
 			"< %s >",
 			strings.ReplaceAll(
 				strings.TrimPrefix(
@@ -587,12 +589,12 @@ func formatMessageQuestionSection(section []dns.Question) string {
 				"\t",
 				" ",
 			),
-		)
+		))
 		if idx != len(section)-1 {
-			ret += `,`
+			ret.WriteString(`,`)
 		}
-		ret += ` `
+		ret.WriteString(` `)
 	}
-	ret += "]"
-	return ret
+	ret.WriteString("]")
+	return ret.String()
 }

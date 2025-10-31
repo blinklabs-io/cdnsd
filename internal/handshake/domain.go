@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 )
 
 const (
@@ -297,6 +298,7 @@ func domainRecordNameDecode(r *BytesReader) (string, error) {
 			if c > DnsMaxLabel {
 				return "", errors.New("label too long")
 			}
+			var sb strings.Builder
 			for range int(c) {
 				b, err := r.ReadByte()
 				if err != nil {
@@ -311,8 +313,9 @@ func domainRecordNameDecode(r *BytesReader) (string, error) {
 				if b == 0x2e {
 					b = 0xfe
 				}
-				name += string([]byte{b})
+				sb.WriteString(string([]byte{b}))
 			}
+			name += sb.String()
 			if len(name) > 0 {
 				name += "."
 			}
