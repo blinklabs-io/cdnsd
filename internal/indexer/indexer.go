@@ -240,8 +240,8 @@ func (i *Indexer) Start() error {
 }
 
 func (i *Indexer) handleEvent(evt event.Event) error {
-	eventTx := evt.Payload.(input_chainsync.TransactionEvent)
-	eventCtx := evt.Context.(input_chainsync.TransactionContext)
+	eventTx := evt.Payload.(event.TransactionEvent)
+	eventCtx := evt.Context.(event.TransactionContext)
 	for _, txOutput := range eventTx.Outputs {
 		// Full address
 		outAddr := txOutput.Address()
@@ -274,7 +274,7 @@ func (i *Indexer) handleEvent(evt event.Event) error {
 }
 
 func (i *Indexer) handleEventOutputDns(
-	eventCtx input_chainsync.TransactionContext,
+	eventCtx event.TransactionContext,
 	tldName string,
 	policyId string,
 	txOutput ledger.TransactionOutput,
@@ -389,7 +389,7 @@ func (i *Indexer) handleEventOutputDns(
 }
 
 func (i *Indexer) handleEventOutputDiscovery(
-	eventCtx input_chainsync.TransactionContext,
+	eventCtx event.TransactionContext,
 	policyId string,
 	txOutput ledger.TransactionOutput,
 ) error {
