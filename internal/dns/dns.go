@@ -552,47 +552,53 @@ func randomFallbackServer() string {
 }
 
 func formatMessageAnswerSection(section []dns.RR) string {
-	ret := "[ "
+	var sb strings.Builder
+	sb.WriteByte('[')
+	sb.WriteByte(' ')
 	for idx, rr := range section {
-		ret += fmt.Sprintf(
-			"< %s >",
-			strings.ReplaceAll(
-				strings.TrimPrefix(
-					rr.String(),
-					";",
-				),
-				"\t",
-				" ",
+		sb.WriteByte('<')
+		sb.WriteByte(' ')
+		sb.WriteString(strings.ReplaceAll(
+			strings.TrimPrefix(
+				rr.String(),
+				";",
 			),
-		)
+			"\t",
+			" ",
+		))
+		sb.WriteByte('>')
+		sb.WriteByte(' ')
 		if idx != len(section)-1 {
-			ret += `,`
+			sb.WriteByte(',')
 		}
-		ret += ` `
+		sb.WriteByte(' ')
 	}
-	ret += "]"
-	return ret
+	sb.WriteByte(']')
+	return sb.String()
 }
 
 func formatMessageQuestionSection(section []dns.Question) string {
-	ret := "[ "
+	var sb strings.Builder
+	sb.WriteByte('[')
+	sb.WriteByte(' ')
 	for idx, question := range section {
-		ret += fmt.Sprintf(
-			"< %s >",
-			strings.ReplaceAll(
-				strings.TrimPrefix(
-					question.String(),
-					";",
-				),
-				"\t",
-				" ",
+		sb.WriteByte('<')
+		sb.WriteByte(' ')
+		sb.WriteString(strings.ReplaceAll(
+			strings.TrimPrefix(
+				question.String(),
+				";",
 			),
-		)
+			"\t",
+			" ",
+		))
+		sb.WriteByte('>')
+		sb.WriteByte(' ')
 		if idx != len(section)-1 {
-			ret += `,`
+			sb.WriteByte(',')
 		}
-		ret += ` `
+		sb.WriteByte(' ')
 	}
-	ret += "]"
-	return ret
+	sb.WriteByte(']')
+	return sb.String()
 }
