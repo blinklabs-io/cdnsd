@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 )
 
 const (
@@ -282,8 +283,8 @@ func domainRecordIPv6Decode(r *BytesReader) (net.IP, error) {
 }
 
 func domainRecordNameDecode(r *BytesReader) (string, error) {
+	var sb strings.Builder
 	// NOTE: this function is mostly ported straight from hnsd
-	var name string
 	for {
 		c, err := r.ReadByte()
 		if err != nil {
@@ -311,10 +312,10 @@ func domainRecordNameDecode(r *BytesReader) (string, error) {
 				if b == 0x2e {
 					b = 0xfe
 				}
-				name += string([]byte{b})
+				sb.WriteByte(b)
 			}
-			if len(name) > 0 {
-				name += "."
+			if sb.Len() > 0 {
+				sb.WriteByte('.')
 			}
 		case 0xc0:
 			// Lookup name from earlier in the buffer
@@ -338,5 +339,5 @@ func domainRecordNameDecode(r *BytesReader) (string, error) {
 			return "", errors.New("unexpected value")
 		}
 	}
-	return name, nil
+	return sb.String(), nil
 }
