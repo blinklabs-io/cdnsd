@@ -47,7 +47,7 @@ func (c *GenericCovenant) Decode(r io.Reader) error {
 	if err != nil {
 		return err
 	}
-	for i := uint64(0); i < itemCount; i++ {
+	for range itemCount {
 		itemLength, err := binary.ReadUvarint(r.(io.ByteReader))
 		if err != nil {
 			return err

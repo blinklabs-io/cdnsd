@@ -42,7 +42,7 @@ func (b *Block) Decode(r *bytes.Buffer) error {
 	if err != nil {
 		return err
 	}
-	for i := uint64(0); i < txCount; i++ {
+	for range txCount {
 		var tmpTx Transaction
 		if err := tmpTx.Decode(r); err != nil {
 			return err
