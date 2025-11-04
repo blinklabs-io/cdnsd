@@ -7,7 +7,7 @@ toolchain go1.24.4
 require (
 	github.com/blinklabs-io/adder v0.33.0
 	github.com/blinklabs-io/cardano-models v0.6.0
-	github.com/blinklabs-io/gouroboros v0.137.0
+	github.com/blinklabs-io/gouroboros v0.137.1
 	github.com/dgraph-io/badger/v4 v4.8.0
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/miekg/dns v1.1.68
