@@ -11,6 +11,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 )
 
@@ -31,6 +32,7 @@ const (
 
 const (
 	messageHeaderLength     = 9
+	netAddressLength        = 88
 	messageMaxPayloadLength = 8 * 1000 * 1000
 )
 
@@ -63,6 +65,10 @@ func decodeMessage(header *msgHeader, payload []byte) (Message, error) {
 		ret = &MsgVersion{}
 	case MessageVerack:
 		ret = &MsgVerack{}
+	case MessageGetAddr:
+		ret = &MsgGetAddr{}
+	case MessageAddr:
+		ret = &MsgAddr{}
 	default:
 		return nil, fmt.Errorf("unsupported message type: %d", header.MessageType)
 	}
@@ -70,6 +76,57 @@ func decodeMessage(header *msgHeader, payload []byte) (Message, error) {
 		return nil, fmt.Errorf("decode message: %w", err)
 	}
 	return ret, nil
+}
+
+func readUvarint(data []byte) (uint64, int, error) {
+	if len(data) == 0 {
+		return 0, 0, errors.New("data is empty")
+	}
+	var ret uint64
+	prefix := data[0]
+	switch prefix {
+	case 0xff:
+		if len(data) < 9 {
+			return 0, 0, errors.New("invalid length for uint64")
+		}
+		ret = uint64(binary.LittleEndian.Uint64(data[1:9]))
+		return ret, 9, nil
+	case 0xfe:
+		if len(data) < 5 {
+			return 0, 0, errors.New("invalid length for uint32")
+		}
+		ret = uint64(binary.LittleEndian.Uint32(data[1:5]))
+		return ret, 5, nil
+	case 0xfd:
+		if len(data) < 3 {
+			return 0, 0, errors.New("invalid length for uint16")
+		}
+		ret = uint64(binary.LittleEndian.Uint16(data[1:3]))
+		return ret, 3, nil
+	default:
+		return uint64(prefix), 1, nil
+	}
+}
+
+func writeUvarint(val uint64) []byte {
+	var ret []byte
+	switch {
+	case val < 0xfd:
+		ret = []byte{uint8(val)}
+	case val <= math.MaxUint16:
+		ret = make([]byte, 3)
+		ret[0] = 0xfd // nolint:gosec // false positive for slice index out of bounds
+		binary.LittleEndian.PutUint16(ret[1:], uint16(val))
+	case val <= math.MaxUint32:
+		ret = make([]byte, 5)
+		ret[0] = 0xfe // nolint:gosec // false positive for slice index out of bounds
+		binary.LittleEndian.PutUint32(ret[1:], uint32(val))
+	default:
+		ret = make([]byte, 9)
+		ret[0] = 0xff // nolint:gosec // false positive for slice index out of bounds
+		binary.LittleEndian.PutUint64(ret[1:], val)
+	}
+	return ret
 }
 
 type msgHeader struct {
@@ -173,6 +230,7 @@ func (n *NetAddress) Encode() []byte {
 	// Services
 	_ = binary.Write(buf, binary.LittleEndian, n.Services)
 	// Address type
+	// This is always zero
 	buf.WriteByte(0)
 	// Address
 	if n.Host.To4() != nil {
@@ -193,12 +251,12 @@ func (n *NetAddress) Encode() []byte {
 }
 
 func (n *NetAddress) Decode(data []byte) error {
-	if len(data) != 88 {
+	if len(data) != netAddressLength {
 		return errors.New("invalid NetAddress length")
 	}
 	n.Time = binary.LittleEndian.Uint64(data[0:8])
 	n.Services = binary.LittleEndian.Uint64(data[8:16])
-	// NOTE: purposely skipping byte at index 16 for address type
+	// NOTE: purposely skipping byte at index 16 for address type, it's always zero
 	n.Host = net.IP(data[17:33])
 	copy(n.Reserved[:], data[33:53])
 	n.Port = binary.BigEndian.Uint16(data[53:55])
@@ -224,7 +282,49 @@ type MsgPong struct{}
 
 type MsgGetAddr struct{}
 
-type MsgAddr struct{}
+func (*MsgGetAddr) Encode() []byte {
+	// No payload
+	return []byte{}
+}
+
+func (*MsgGetAddr) Decode(data []byte) error {
+	// No payload
+	return nil
+}
+
+type MsgAddr struct {
+	Peers []NetAddress
+}
+
+func (m *MsgAddr) Encode() []byte {
+	buf := new(bytes.Buffer)
+	uvarCount := writeUvarint(uint64(len(m.Peers)))
+	_, _ = buf.Write(uvarCount)
+	for _, peer := range m.Peers {
+		peerBytes := peer.Encode()
+		_, _ = buf.Write(peerBytes)
+	}
+	return buf.Bytes()
+}
+
+func (m *MsgAddr) Decode(data []byte) error {
+	count, bytesRead, err := readUvarint(data)
+	if err != nil {
+		return err
+	}
+	data = data[bytesRead:]
+	if len(data) != int(count*netAddressLength) { // nolint:gosec
+		return errors.New("invalid payload length")
+	}
+	m.Peers = make([]NetAddress, count)
+	for i := range count {
+		if err := m.Peers[i].Decode(data[:netAddressLength]); err != nil {
+			return err
+		}
+		data = data[netAddressLength:]
+	}
+	return nil
+}
 
 type MsgGetHeaders struct{}
 
