@@ -76,3 +76,43 @@ func TestMsgVersionEncodeDecode(t *testing.T) {
 		}
 	}
 }
+
+func TestMsgAddrEncodeDecode(t *testing.T) {
+	testDefs := []struct {
+		message   Message
+		binaryHex string
+	}{
+		// Modified (truncated) from data captured from hsd
+		{
+			binaryHex: "015757fc680000000003000000000000000000000000000000000000ffff2d4f5fe40000000000000000000000000000000000000000062f000000000000000000000000000000000000000000000000000000000000000000",
+			message: &MsgAddr{
+				Peers: []NetAddress{
+					{
+						Time:     0x68fc5757,
+						Services: 0x3,
+						Host:     net.IP{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xff, 0xff, 0x2d, 0x4f, 0x5f, 0xe4},
+						Port:     0x62f,
+					},
+				},
+			},
+		},
+	}
+	for _, testDef := range testDefs {
+		binaryData, err := hex.DecodeString(testDef.binaryHex)
+		if err != nil {
+			t.Fatalf("unexpected error decoding hex: %s", err)
+		}
+		testMsg := new(MsgAddr)
+		if err := testMsg.Decode(binaryData); err != nil {
+			t.Fatalf("unexpected error decoding message: %s", err)
+		}
+		if !reflect.DeepEqual(testMsg, testDef.message) {
+			t.Fatalf("did not get expected message after decode:\n     got: %#v\n  wanted: %#v", testMsg, testDef.message)
+		}
+		testEncoded := testMsg.Encode()
+		testEncodedHex := hex.EncodeToString(testEncoded)
+		if testEncodedHex != testDef.binaryHex {
+			t.Fatalf("did not get expected binary hex after encode:\n     got: %s\n  wanted: %s", testEncodedHex, testDef.binaryHex)
+		}
+	}
+}

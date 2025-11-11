@@ -75,15 +75,19 @@ func (p *Peer) Close() error {
 }
 
 // sendMessage encodes and sends a message with the given type and payload
-func (p *Peer) sendMessage(msgType uint8, payload []byte) error {
+func (p *Peer) sendMessage(msgType uint8, msgPayload Message) error {
 	if p.conn == nil {
 		return errors.New("connection is not established")
 	}
-	msg, err := encodeMessage(msgType, payload, p.networkMagic)
+	var payload []byte
+	if msgPayload != nil {
+		payload = msgPayload.Encode()
+	}
+	rawMsg, err := encodeMessage(msgType, payload, p.networkMagic)
 	if err != nil {
 		return err
 	}
-	_, err = p.conn.Write(msg)
+	_, err = p.conn.Write(rawMsg)
 	if err != nil {
 		return err
 	}
@@ -125,7 +129,7 @@ func (p *Peer) handshake() error {
 		return err
 	}
 	timeNow := uint64(time.Now().Unix()) // nolint:gosec
-	versionMsg := MsgVersion{
+	versionMsg := &MsgVersion{
 		Version:  protocolVersion,
 		Services: protocolServicesNoServices,
 		Time:     timeNow,
@@ -140,8 +144,7 @@ func (p *Peer) handshake() error {
 		Height:  0,
 		NoRelay: true,
 	}
-	encodedMsg := versionMsg.Encode()
-	if err := p.sendMessage(MessageVersion, encodedMsg); err != nil {
+	if err := p.sendMessage(MessageVersion, versionMsg); err != nil {
 		return err
 	}
 	// Wait for Verack response
@@ -165,4 +168,21 @@ func (p *Peer) handshake() error {
 		return err
 	}
 	return nil
+}
+
+// GetPeers requests a list of peers from the network peer
+func (p *Peer) GetPeers() ([]NetAddress, error) {
+	if err := p.sendMessage(MessageGetAddr, nil); err != nil {
+		return nil, err
+	}
+	// Wait for Addr response
+	msg, err := p.receiveMessage()
+	if err != nil {
+		return nil, err
+	}
+	msgAddr, ok := msg.(*MsgAddr)
+	if !ok {
+		return nil, fmt.Errorf("unexpected message: %T", msg)
+	}
+	return msgAddr.Peers, nil
 }
