@@ -12,6 +12,10 @@ import (
 	"io"
 )
 
+const (
+	BlockHeaderSize = 236
+)
+
 type Block struct {
 	Header       BlockHeader
 	Transactions []Transaction
@@ -66,9 +70,30 @@ type BlockHeader struct {
 	Mask         [32]byte
 }
 
+func NewBlockHeaderFromReader(r io.Reader) (*BlockHeader, error) {
+	// Read entire input into a bytes.Buffer
+	tmpData, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+	buf := bytes.NewBuffer(tmpData)
+	// Decode block header
+	var tmpBlockHeader BlockHeader
+	if err := tmpBlockHeader.Decode(buf); err != nil {
+		return nil, err
+	}
+	return &tmpBlockHeader, err
+}
+
 func (h *BlockHeader) Decode(r io.Reader) error {
 	if err := binary.Read(r, binary.LittleEndian, h); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (h *BlockHeader) Encode() []byte {
+	buf := new(bytes.Buffer)
+	_ = binary.Write(buf, binary.LittleEndian, h)
+	return buf.Bytes()
 }

@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"math"
 	"net"
+
+	"github.com/blinklabs-io/cdnsd/internal/handshake"
 )
 
 // Message types
@@ -35,6 +37,14 @@ const (
 	netAddressLength        = 88
 	messageMaxPayloadLength = 8 * 1000 * 1000
 )
+
+type UnsupportedMessageTypeError struct {
+	MessageType uint8
+}
+
+func (e UnsupportedMessageTypeError) Error() string {
+	return fmt.Sprintf("unsupported message type: %d", e.MessageType)
+}
 
 type Message interface {
 	Encode() []byte
@@ -69,8 +79,12 @@ func decodeMessage(header *msgHeader, payload []byte) (Message, error) {
 		ret = &MsgGetAddr{}
 	case MessageAddr:
 		ret = &MsgAddr{}
+	case MessageGetHeaders:
+		ret = &MsgGetHeaders{}
+	case MessageHeaders:
+		ret = &MsgHeaders{}
 	default:
-		return nil, fmt.Errorf("unsupported message type: %d", header.MessageType)
+		return nil, UnsupportedMessageTypeError{MessageType: header.MessageType}
 	}
 	if err := ret.Decode(payload); err != nil {
 		return nil, fmt.Errorf("decode message: %w", err)
@@ -326,9 +340,76 @@ func (m *MsgAddr) Decode(data []byte) error {
 	return nil
 }
 
-type MsgGetHeaders struct{}
+type MsgGetHeaders struct {
+	Locator  [][32]byte
+	StopHash [32]byte
+}
 
-type MsgHeaders struct{}
+func (m *MsgGetHeaders) Encode() []byte {
+	buf := new(bytes.Buffer)
+	locatorCount := writeUvarint(uint64(len(m.Locator)))
+	_, _ = buf.Write(locatorCount)
+	for _, loc := range m.Locator {
+		_, _ = buf.Write(loc[:])
+	}
+	_, _ = buf.Write(m.StopHash[:])
+	return buf.Bytes()
+}
+
+func (m *MsgGetHeaders) Decode(data []byte) error {
+	count, bytesRead, err := readUvarint(data)
+	if err != nil {
+		return err
+	}
+	data = data[bytesRead:]
+	if len(data) != int(((count * 32) + 32)) { // nolint:gosec
+		return errors.New("invalid payload length")
+	}
+	m.Locator = make([][32]byte, count)
+	for i := range count {
+		loc := data[0:32]
+		m.Locator[i] = [32]byte(loc)
+		data = data[32:]
+	}
+	m.StopHash = [32]byte(data[0:32])
+	return nil
+}
+
+type MsgHeaders struct {
+	Headers []*handshake.BlockHeader
+}
+
+func (m *MsgHeaders) Encode() []byte {
+	buf := new(bytes.Buffer)
+	headerCount := writeUvarint(uint64(len(m.Headers)))
+	_, _ = buf.Write(headerCount)
+	for _, header := range m.Headers {
+		_, _ = buf.Write(header.Encode())
+	}
+	return buf.Bytes()
+}
+
+func (m *MsgHeaders) Decode(data []byte) error {
+	count, bytesRead, err := readUvarint(data)
+	if err != nil {
+		return err
+	}
+	data = data[bytesRead:]
+	if len(data) != int(count*handshake.BlockHeaderSize) { // nolint:gosec
+		return errors.New("invalid payload length")
+	}
+	m.Headers = make([]*handshake.BlockHeader, count)
+	for i := range count {
+		tmpReader := bytes.NewReader(data[0:handshake.BlockHeaderSize])
+		tmpHeader, err := handshake.NewBlockHeaderFromReader(tmpReader)
+		if err != nil {
+			return err
+		}
+		m.Headers[i] = tmpHeader
+		data = data[handshake.BlockHeaderSize:]
+	}
+	return nil
+}
 
 type MsgSendHeaders struct{}
 
