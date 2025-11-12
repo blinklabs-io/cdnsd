@@ -8,6 +8,7 @@ package protocol
 
 import (
 	"crypto/rand"
+	"crypto/sha3"
 	"errors"
 	"fmt"
 	"io"
@@ -214,4 +215,26 @@ func (p *Peer) GetHeaders(locator [][32]byte, stopHash [32]byte) ([]*handshake.B
 		return nil, fmt.Errorf("unexpected message: %T", msg)
 	}
 	return msgHeaders.Headers, nil
+}
+
+// GetProof requests a proof for a domain name from the network peer
+func (p *Peer) GetProof(name string, rootHash [32]byte) (*handshake.Proof, error) {
+	key := sha3.Sum256([]byte(name))
+	getProofMsg := &MsgGetProof{
+		Root: rootHash,
+		Key:  key,
+	}
+	if err := p.sendMessage(MessageGetProof, getProofMsg); err != nil {
+		return nil, err
+	}
+	// Wait for Proof response
+	msg, err := p.receiveMessage()
+	if err != nil {
+		return nil, err
+	}
+	msgProof, ok := msg.(*MsgProof)
+	if !ok {
+		return nil, fmt.Errorf("unexpected message: %T", msg)
+	}
+	return msgProof.Proof, nil
 }
