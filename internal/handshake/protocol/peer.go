@@ -13,6 +13,8 @@ import (
 	"io"
 	"net"
 	"time"
+
+	"github.com/blinklabs-io/cdnsd/internal/handshake"
 )
 
 const (
@@ -116,6 +118,12 @@ func (p *Peer) receiveMessage() (Message, error) {
 	}
 	msg, err := decodeMessage(header, payload)
 	if err != nil {
+		// Discard unsupported messages and try to get another message
+		// This is a bit of a hack
+		var unsupportedErr UnsupportedMessageTypeError
+		if errors.As(err, &unsupportedErr) {
+			return p.receiveMessage()
+		}
 		return nil, err
 	}
 	return msg, nil
@@ -185,4 +193,25 @@ func (p *Peer) GetPeers() ([]NetAddress, error) {
 		return nil, fmt.Errorf("unexpected message: %T", msg)
 	}
 	return msgAddr.Peers, nil
+}
+
+// GetHeaders requests a list of headers from the network peer
+func (p *Peer) GetHeaders(locator [][32]byte, stopHash [32]byte) ([]*handshake.BlockHeader, error) {
+	getHeadersMsg := &MsgGetHeaders{
+		Locator:  locator,
+		StopHash: stopHash,
+	}
+	if err := p.sendMessage(MessageGetHeaders, getHeadersMsg); err != nil {
+		return nil, err
+	}
+	// Wait for Headers response
+	msg, err := p.receiveMessage()
+	if err != nil {
+		return nil, err
+	}
+	msgHeaders, ok := msg.(*MsgHeaders)
+	if !ok {
+		return nil, fmt.Errorf("unexpected message: %T", msg)
+	}
+	return msgHeaders.Headers, nil
 }
