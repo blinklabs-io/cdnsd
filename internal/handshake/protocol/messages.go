@@ -83,6 +83,10 @@ func decodeMessage(header *msgHeader, payload []byte) (Message, error) {
 		ret = &MsgGetHeaders{}
 	case MessageHeaders:
 		ret = &MsgHeaders{}
+	case MessageGetProof:
+		ret = &MsgGetProof{}
+	case MessageProof:
+		ret = &MsgProof{}
 	default:
 		return nil, UnsupportedMessageTypeError{MessageType: header.MessageType}
 	}
@@ -413,6 +417,49 @@ func (m *MsgHeaders) Decode(data []byte) error {
 
 type MsgSendHeaders struct{}
 
-type MsgGetProof struct{}
+type MsgGetProof struct {
+	Root [32]byte
+	Key  [32]byte
+}
 
-type MsgProof struct{}
+func (m *MsgGetProof) Encode() []byte {
+	buf := new(bytes.Buffer)
+	_, _ = buf.Write(m.Root[:])
+	_, _ = buf.Write(m.Key[:])
+	return buf.Bytes()
+}
+
+func (m *MsgGetProof) Decode(data []byte) error {
+	if len(data) != 2*32 {
+		return errors.New("invalid payload length")
+	}
+	m.Root = [32]byte(data[0:32])
+	m.Key = [32]byte(data[32:64])
+	return nil
+}
+
+type MsgProof struct {
+	Root  [32]byte
+	Key   [32]byte
+	Proof *handshake.Proof
+}
+
+func (m *MsgProof) Encode() []byte {
+	// NOTE: this is not implemented because proof encoding is not implemented
+	return []byte{}
+}
+
+func (m *MsgProof) Decode(data []byte) error {
+	// The payload should be much more than 64 bytes, but we don't know the size of the proof
+	if len(data) < 64 {
+		return errors.New("invalid payload length")
+	}
+	m.Root = [32]byte(data[0:32])
+	m.Key = [32]byte(data[32:64])
+	var tmpProof handshake.Proof
+	if err := tmpProof.Decode(bytes.NewBuffer(data[64:])); err != nil {
+		return err
+	}
+	m.Proof = &tmpProof
+	return nil
+}
