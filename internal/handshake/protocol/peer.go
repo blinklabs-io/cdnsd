@@ -238,3 +238,28 @@ func (p *Peer) GetProof(name string, rootHash [32]byte) (*handshake.Proof, error
 	}
 	return msgProof.Proof, nil
 }
+
+// GetBlock requests the specified block from the network peer
+func (p *Peer) GetBlock(hash [32]byte) (*handshake.Block, error) {
+	getDataMsg := &MsgGetData{
+		Inventory: []InvItem{
+			{
+				Type: InvTypeBlock,
+				Hash: hash,
+			},
+		},
+	}
+	if err := p.sendMessage(MessageGetData, getDataMsg); err != nil {
+		return nil, err
+	}
+	// Wait for Block response
+	msg, err := p.receiveMessage()
+	if err != nil {
+		return nil, err
+	}
+	msgBlock, ok := msg.(*MsgBlock)
+	if !ok {
+		return nil, fmt.Errorf("unexpected message: %T", msg)
+	}
+	return msgBlock.Block, nil
+}
