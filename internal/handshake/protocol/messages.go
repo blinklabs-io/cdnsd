@@ -25,9 +25,11 @@ const (
 	MessagePong        = 3
 	MessageGetAddr     = 4
 	MessageAddr        = 5
+	MessageGetData     = 7
 	MessageGetHeaders  = 10
 	MessageHeaders     = 11
 	MessageSendHeaders = 12
+	MessageBlock       = 13
 	MessageGetProof    = 26
 	MessageProof       = 27
 )
@@ -79,10 +81,14 @@ func decodeMessage(header *msgHeader, payload []byte) (Message, error) {
 		ret = &MsgGetAddr{}
 	case MessageAddr:
 		ret = &MsgAddr{}
+	case MessageGetData:
+		ret = &MsgGetData{}
 	case MessageGetHeaders:
 		ret = &MsgGetHeaders{}
 	case MessageHeaders:
 		ret = &MsgHeaders{}
+	case MessageBlock:
+		ret = &MsgBlock{}
 	case MessageGetProof:
 		ret = &MsgGetProof{}
 	case MessageProof:
@@ -344,6 +350,40 @@ func (m *MsgAddr) Decode(data []byte) error {
 	return nil
 }
 
+type MsgGetData struct {
+	Inventory []InvItem
+}
+
+func (m *MsgGetData) Encode() []byte {
+	buf := new(bytes.Buffer)
+	uvarCount := writeUvarint(uint64(len(m.Inventory)))
+	_, _ = buf.Write(uvarCount)
+	for _, inv := range m.Inventory {
+		invBytes := inv.Encode()
+		_, _ = buf.Write(invBytes)
+	}
+	return buf.Bytes()
+}
+
+func (m *MsgGetData) Decode(data []byte) error {
+	count, bytesRead, err := readUvarint(data)
+	if err != nil {
+		return err
+	}
+	data = data[bytesRead:]
+	if len(data) != int(count)*36 { // nolint:gosec
+		return errors.New("invalid payload length")
+	}
+	m.Inventory = make([]InvItem, count)
+	for i := range count {
+		if err := m.Inventory[i].Decode(data[0:36]); err != nil {
+			return err
+		}
+		data = data[36:]
+	}
+	return nil
+}
+
 type MsgGetHeaders struct {
 	Locator  [][32]byte
 	StopHash [32]byte
@@ -417,6 +457,24 @@ func (m *MsgHeaders) Decode(data []byte) error {
 
 type MsgSendHeaders struct{}
 
+type MsgBlock struct {
+	Block *handshake.Block
+}
+
+func (m *MsgBlock) Encode() []byte {
+	// NOTE: this isn't implemented because we don't have block encoding implemented
+	return []byte{}
+}
+
+func (m *MsgBlock) Decode(data []byte) error {
+	blk, err := handshake.NewBlockFromReader(bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	m.Block = blk
+	return nil
+}
+
 type MsgGetProof struct {
 	Root [32]byte
 	Key  [32]byte
@@ -461,5 +519,35 @@ func (m *MsgProof) Decode(data []byte) error {
 		return err
 	}
 	m.Proof = &tmpProof
+	return nil
+}
+
+const (
+	InvTypeTx            = 1
+	InvTypeBlock         = 2
+	InvTypeFilteredBlock = 3
+	InvTypeCmpctBlock    = 4
+	InvTypeClaim         = 5
+	InvTypeAirDrop       = 6
+)
+
+type InvItem struct {
+	Type uint32
+	Hash [32]byte
+}
+
+func (i *InvItem) Encode() []byte {
+	buf := new(bytes.Buffer)
+	_ = binary.Write(buf, binary.LittleEndian, i.Type)
+	_, _ = buf.Write(i.Hash[:])
+	return buf.Bytes()
+}
+
+func (i *InvItem) Decode(data []byte) error {
+	if len(data) != 36 {
+		return errors.New("invalid payload length")
+	}
+	i.Type = binary.LittleEndian.Uint32(data[0:4])
+	i.Hash = [32]byte(data[4:])
 	return nil
 }
