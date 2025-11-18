@@ -14,7 +14,6 @@ import (
 
 // DNSReferenceRefScriptDatum represents the auto-discovery datum type for scripts that handle DNS records
 type DNSReferenceRefScriptDatum struct {
-	// This allows the type to be used with cbor.DecodeGeneric
 	cbor.StructAsArray
 	TldName    []byte
 	SymbolDrat []byte
@@ -56,5 +55,12 @@ func (d *DNSReferenceRefScriptDatum) UnmarshalCBOR(cborData []byte) error {
 			tmpDataInner.Constructor(),
 		)
 	}
-	return cbor.DecodeGeneric(tmpDataInner.FieldsCbor(), d)
+	// Decode constr field data without using our custom decode function
+	type tDNSReferenceRefScriptDatum DNSReferenceRefScriptDatum
+	var tmpScriptDatum tDNSReferenceRefScriptDatum
+	if _, err := cbor.Decode(tmpDataInner.FieldsCbor(), &tmpScriptDatum); err != nil {
+		return err
+	}
+	*d = DNSReferenceRefScriptDatum(tmpScriptDatum)
+	return nil
 }
