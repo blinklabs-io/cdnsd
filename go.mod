@@ -7,7 +7,7 @@ toolchain go1.24.4
 require (
 	github.com/blinklabs-io/adder v0.33.0
 	github.com/blinklabs-io/cardano-models v0.6.0
-	github.com/blinklabs-io/gouroboros v0.138.0
+	github.com/blinklabs-io/gouroboros v0.139.0
 	github.com/dgraph-io/badger/v4 v4.8.0
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/miekg/dns v1.1.68
@@ -53,7 +53,7 @@ require (
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.66.1 // indirect
 	github.com/prometheus/procfs v0.16.1 // indirect
-	github.com/utxorpc/go-codegen v0.17.0 // indirect
+	github.com/utxorpc/go-codegen v0.18.1 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/otel v1.37.0 // indirect
@@ -66,5 +66,5 @@ require (
 	golang.org/x/sys v0.37.0 // indirect
 	golang.org/x/text v0.30.0 // indirect
 	golang.org/x/tools v0.37.0 // indirect
-	google.golang.org/protobuf v1.36.9 // indirect
+	google.golang.org/protobuf v1.36.10 // indirect
 )
