@@ -49,7 +49,7 @@ func (t *Transaction) Decode(r *bytes.Buffer) error {
 		return err
 	}
 	// Inputs
-	inCount, err := binary.ReadUvarint(r)
+	inCount, err := ReadUvarintReader(r)
 	if err != nil {
 		return err
 	}
@@ -61,7 +61,7 @@ func (t *Transaction) Decode(r *bytes.Buffer) error {
 		t.Inputs = append(t.Inputs, tmpInput)
 	}
 	// Outputs
-	outCount, err := binary.ReadUvarint(r)
+	outCount, err := ReadUvarintReader(r)
 	if err != nil {
 		return err
 	}
@@ -136,13 +136,13 @@ func (i *TransactionInput) Decode(r *bytes.Buffer) error {
 }
 
 func (i *TransactionInput) DecodeWitness(r io.Reader) error {
-	witnessCount, err := binary.ReadUvarint(r.(io.ByteReader))
+	witnessCount, err := ReadUvarintReader(r)
 	if err != nil {
 		return err
 	}
 	i.Witness = make([][]byte, witnessCount)
 	for j := range witnessCount {
-		itemLength, err := binary.ReadUvarint(r.(io.ByteReader))
+		itemLength, err := ReadUvarintReader(r)
 		if err != nil {
 			return err
 		}

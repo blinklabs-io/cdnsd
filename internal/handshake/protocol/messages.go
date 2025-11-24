@@ -11,7 +11,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math"
 	"net"
 
 	"github.com/blinklabs-io/cdnsd/internal/handshake"
@@ -104,57 +103,6 @@ func decodeMessage(header *msgHeader, payload []byte) (Message, error) {
 		return nil, fmt.Errorf("decode message: %w", err)
 	}
 	return ret, nil
-}
-
-func readUvarint(data []byte) (uint64, int, error) {
-	if len(data) == 0 {
-		return 0, 0, errors.New("data is empty")
-	}
-	var ret uint64
-	prefix := data[0]
-	switch prefix {
-	case 0xff:
-		if len(data) < 9 {
-			return 0, 0, errors.New("invalid length for uint64")
-		}
-		ret = uint64(binary.LittleEndian.Uint64(data[1:9]))
-		return ret, 9, nil
-	case 0xfe:
-		if len(data) < 5 {
-			return 0, 0, errors.New("invalid length for uint32")
-		}
-		ret = uint64(binary.LittleEndian.Uint32(data[1:5]))
-		return ret, 5, nil
-	case 0xfd:
-		if len(data) < 3 {
-			return 0, 0, errors.New("invalid length for uint16")
-		}
-		ret = uint64(binary.LittleEndian.Uint16(data[1:3]))
-		return ret, 3, nil
-	default:
-		return uint64(prefix), 1, nil
-	}
-}
-
-func writeUvarint(val uint64) []byte {
-	var ret []byte
-	switch {
-	case val < 0xfd:
-		ret = []byte{uint8(val)}
-	case val <= math.MaxUint16:
-		ret = make([]byte, 3)
-		ret[0] = 0xfd // nolint:gosec // false positive for slice index out of bounds
-		binary.LittleEndian.PutUint16(ret[1:], uint16(val))
-	case val <= math.MaxUint32:
-		ret = make([]byte, 5)
-		ret[0] = 0xfe // nolint:gosec // false positive for slice index out of bounds
-		binary.LittleEndian.PutUint32(ret[1:], uint32(val))
-	default:
-		ret = make([]byte, 9)
-		ret[0] = 0xff // nolint:gosec // false positive for slice index out of bounds
-		binary.LittleEndian.PutUint64(ret[1:], val)
-	}
-	return ret
 }
 
 type msgHeader struct {
@@ -358,7 +306,7 @@ type MsgAddr struct {
 
 func (m *MsgAddr) Encode() []byte {
 	buf := new(bytes.Buffer)
-	uvarCount := writeUvarint(uint64(len(m.Peers)))
+	uvarCount := handshake.WriteUvarint(uint64(len(m.Peers)))
 	_, _ = buf.Write(uvarCount)
 	for _, peer := range m.Peers {
 		peerBytes := peer.Encode()
@@ -368,7 +316,7 @@ func (m *MsgAddr) Encode() []byte {
 }
 
 func (m *MsgAddr) Decode(data []byte) error {
-	count, bytesRead, err := readUvarint(data)
+	count, bytesRead, err := handshake.ReadUvarint(data)
 	if err != nil {
 		return err
 	}
@@ -392,7 +340,7 @@ type MsgGetData struct {
 
 func (m *MsgGetData) Encode() []byte {
 	buf := new(bytes.Buffer)
-	uvarCount := writeUvarint(uint64(len(m.Inventory)))
+	uvarCount := handshake.WriteUvarint(uint64(len(m.Inventory)))
 	_, _ = buf.Write(uvarCount)
 	for _, inv := range m.Inventory {
 		invBytes := inv.Encode()
@@ -402,7 +350,7 @@ func (m *MsgGetData) Encode() []byte {
 }
 
 func (m *MsgGetData) Decode(data []byte) error {
-	count, bytesRead, err := readUvarint(data)
+	count, bytesRead, err := handshake.ReadUvarint(data)
 	if err != nil {
 		return err
 	}
@@ -427,7 +375,7 @@ type MsgGetHeaders struct {
 
 func (m *MsgGetHeaders) Encode() []byte {
 	buf := new(bytes.Buffer)
-	locatorCount := writeUvarint(uint64(len(m.Locator)))
+	locatorCount := handshake.WriteUvarint(uint64(len(m.Locator)))
 	_, _ = buf.Write(locatorCount)
 	for _, loc := range m.Locator {
 		_, _ = buf.Write(loc[:])
@@ -437,7 +385,7 @@ func (m *MsgGetHeaders) Encode() []byte {
 }
 
 func (m *MsgGetHeaders) Decode(data []byte) error {
-	count, bytesRead, err := readUvarint(data)
+	count, bytesRead, err := handshake.ReadUvarint(data)
 	if err != nil {
 		return err
 	}
@@ -461,7 +409,7 @@ type MsgHeaders struct {
 
 func (m *MsgHeaders) Encode() []byte {
 	buf := new(bytes.Buffer)
-	headerCount := writeUvarint(uint64(len(m.Headers)))
+	headerCount := handshake.WriteUvarint(uint64(len(m.Headers)))
 	_, _ = buf.Write(headerCount)
 	for _, header := range m.Headers {
 		_, _ = buf.Write(header.Encode())
@@ -470,7 +418,7 @@ func (m *MsgHeaders) Encode() []byte {
 }
 
 func (m *MsgHeaders) Decode(data []byte) error {
-	count, bytesRead, err := readUvarint(data)
+	count, bytesRead, err := handshake.ReadUvarint(data)
 	if err != nil {
 		return err
 	}
