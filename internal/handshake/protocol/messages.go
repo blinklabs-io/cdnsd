@@ -77,6 +77,10 @@ func decodeMessage(header *msgHeader, payload []byte) (Message, error) {
 		ret = &MsgVersion{}
 	case MessageVerack:
 		ret = &MsgVerack{}
+	case MessagePing:
+		ret = &MsgPing{}
+	case MessagePong:
+		ret = &MsgPong{}
 	case MessageGetAddr:
 		ret = &MsgGetAddr{}
 	case MessageAddr:
@@ -300,9 +304,41 @@ func (*MsgVerack) Decode(data []byte) error {
 	return nil
 }
 
-type MsgPing struct{}
+type MsgPing struct {
+	Nonce uint64
+}
 
-type MsgPong struct{}
+func (m *MsgPing) Encode() []byte {
+	buf := new(bytes.Buffer)
+	_ = binary.Write(buf, binary.LittleEndian, m.Nonce)
+	return buf.Bytes()
+}
+
+func (m *MsgPing) Decode(data []byte) error {
+	if len(data) != 8 {
+		return errors.New("invalid payload length")
+	}
+	m.Nonce = binary.LittleEndian.Uint64(data)
+	return nil
+}
+
+type MsgPong struct {
+	Nonce uint64
+}
+
+func (m *MsgPong) Encode() []byte {
+	buf := new(bytes.Buffer)
+	_ = binary.Write(buf, binary.LittleEndian, m.Nonce)
+	return buf.Bytes()
+}
+
+func (m *MsgPong) Decode(data []byte) error {
+	if len(data) != 8 {
+		return errors.New("invalid payload length")
+	}
+	m.Nonce = binary.LittleEndian.Uint64(data)
+	return nil
+}
 
 type MsgGetAddr struct{}
 

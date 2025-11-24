@@ -195,7 +195,7 @@ func (p *Peer) recvLoop() {
 }
 
 func (p *Peer) handleMessage(msg Message) error {
-	switch msg.(type) {
+	switch m := msg.(type) {
 	case *MsgVersion, *MsgVerack:
 		p.handshakeCh <- msg
 	case *MsgAddr:
@@ -206,8 +206,21 @@ func (p *Peer) handleMessage(msg Message) error {
 		p.blockCh <- msg
 	case *MsgProof:
 		p.proofCh <- msg
+	case *MsgPing:
+		return p.handlePing(m)
 	default:
 		return fmt.Errorf("unknown message type: %T", msg)
+	}
+	return nil
+}
+
+// handlePing responds to Ping messages with a Pong message containing the same nonce value
+func (p *Peer) handlePing(msg *MsgPing) error {
+	pongMsg := &MsgPong{
+		Nonce: msg.Nonce,
+	}
+	if err := p.sendMessage(MessagePong, pongMsg); err != nil {
+		return err
 	}
 	return nil
 }
