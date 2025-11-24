@@ -43,12 +43,12 @@ func (c *GenericCovenant) Decode(r io.Reader) error {
 	if err := binary.Read(r, binary.LittleEndian, &c.Type); err != nil {
 		return err
 	}
-	itemCount, err := binary.ReadUvarint(r.(io.ByteReader))
+	itemCount, err := ReadUvarintReader(r)
 	if err != nil {
 		return err
 	}
 	for range itemCount {
-		itemLength, err := binary.ReadUvarint(r.(io.ByteReader))
+		itemLength, err := ReadUvarintReader(r)
 		if err != nil {
 			return err
 		}
