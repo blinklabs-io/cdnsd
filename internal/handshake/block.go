@@ -45,7 +45,7 @@ func (b *Block) Decode(r *bytes.Buffer) error {
 		return err
 	}
 	// Transactions
-	txCount, err := binary.ReadUvarint(r)
+	txCount, err := ReadUvarintReader(r)
 	if err != nil {
 		return err
 	}
