@@ -4,7 +4,7 @@
 // license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT.
 
-package protocol
+package handshake
 
 import (
 	"crypto/rand"
@@ -16,8 +16,6 @@ import (
 	"net"
 	"sync"
 	"time"
-
-	"github.com/blinklabs-io/cdnsd/internal/handshake"
 )
 
 const (
@@ -303,7 +301,7 @@ func (p *Peer) GetPeers() ([]NetAddress, error) {
 }
 
 // GetHeaders requests a list of headers from the network peer
-func (p *Peer) GetHeaders(locator [][32]byte, stopHash [32]byte) ([]*handshake.BlockHeader, error) {
+func (p *Peer) GetHeaders(locator [][32]byte, stopHash [32]byte) ([]*BlockHeader, error) {
 	getHeadersMsg := &MsgGetHeaders{
 		Locator:  locator,
 		StopHash: stopHash,
@@ -327,7 +325,7 @@ func (p *Peer) GetHeaders(locator [][32]byte, stopHash [32]byte) ([]*handshake.B
 }
 
 // GetProof requests a proof for a domain name from the network peer
-func (p *Peer) GetProof(name string, rootHash [32]byte) (*handshake.Proof, error) {
+func (p *Peer) GetProof(name string, rootHash [32]byte) (*Proof, error) {
 	key := sha3.Sum256([]byte(name))
 	getProofMsg := &MsgGetProof{
 		Root: rootHash,
@@ -352,7 +350,7 @@ func (p *Peer) GetProof(name string, rootHash [32]byte) (*handshake.Proof, error
 }
 
 // GetBlock requests the specified block from the network peer
-func (p *Peer) GetBlock(hash [32]byte) (*handshake.Block, error) {
+func (p *Peer) GetBlock(hash [32]byte) (*Block, error) {
 	getDataMsg := &MsgGetData{
 		Inventory: []InvItem{
 			{
@@ -379,8 +377,8 @@ func (p *Peer) GetBlock(hash [32]byte) (*handshake.Block, error) {
 	}
 }
 
-// SyncFunc is a callback function that takes a *handshake.Block, optionally returning its own error
-type SyncFunc func(*handshake.Block) error
+// SyncFunc is a callback function that takes a *Block, optionally returning its own error
+type SyncFunc func(*Block) error
 
 // Sync starts an async process to sync the blockchain, starting with the specified locator
 // and calling the specified callback for each fetched block or sync-related error
