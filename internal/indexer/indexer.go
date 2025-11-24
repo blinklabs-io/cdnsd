@@ -55,12 +55,13 @@ type Domain struct {
 }
 
 type Indexer struct {
-	pipeline     *pipeline.Pipeline
-	domains      map[string]Domain
-	tipReached   bool
-	syncLogTimer *time.Timer
-	syncStatus   input_chainsync.ChainSyncStatus
-	watched      []watchedAddr
+	pipeline       *pipeline.Pipeline
+	domains        map[string]Domain
+	tipReached     bool
+	syncLogTimer   *time.Timer
+	syncStatus     input_chainsync.ChainSyncStatus
+	watched        []watchedAddr
+	handshakeState handshakeState
 }
 
 type watchedAddr struct {
@@ -76,6 +77,16 @@ var globalIndexer = &Indexer{
 }
 
 func (i *Indexer) Start() error {
+	if err := i.startCardano(); err != nil {
+		return err
+	}
+	if err := i.startHandshake(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (i *Indexer) startCardano() error {
 	// Build watched addresses from enabled profiles
 	cfg := config.GetConfig()
 	for _, profile := range config.GetProfiles() {
