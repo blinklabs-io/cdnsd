@@ -9,6 +9,7 @@ package protocol
 import (
 	"crypto/rand"
 	"crypto/sha3"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -31,7 +32,7 @@ const (
 type Peer struct {
 	address      string
 	conn         net.Conn
-	networkMagic uint32
+	network      Network
 	mu           sync.Mutex
 	sendMu       sync.Mutex
 	hasConnected bool
@@ -46,12 +47,12 @@ type Peer struct {
 
 // NewPeer returns a new Peer using an existing connection (if provided) and the specified network magic. If a connection is provided,
 // the handshake process will be performed
-func NewPeer(conn net.Conn, networkMagic uint32) (*Peer, error) {
+func NewPeer(conn net.Conn, network Network) (*Peer, error) {
 	p := &Peer{
-		conn:         conn,
-		networkMagic: networkMagic,
-		doneCh:       make(chan struct{}),
-		errorCh:      make(chan error, 5),
+		conn:    conn,
+		network: network,
+		doneCh:  make(chan struct{}),
+		errorCh: make(chan error, 5),
 	}
 	if conn != nil {
 		p.conn = conn
@@ -137,7 +138,7 @@ func (p *Peer) sendMessage(msgType uint8, msgPayload Message) error {
 	if msgPayload != nil {
 		payload = msgPayload.Encode()
 	}
-	rawMsg, err := encodeMessage(msgType, payload, p.networkMagic)
+	rawMsg, err := encodeMessage(msgType, payload, p.network.Magic)
 	if err != nil {
 		return err
 	}
@@ -162,7 +163,7 @@ func (p *Peer) recvLoop() {
 			if err := header.Decode(headerBuf); err != nil {
 				return fmt.Errorf("header decode: %w", err)
 			}
-			if header.NetworkMagic != p.networkMagic {
+			if header.NetworkMagic != p.network.Magic {
 				return fmt.Errorf("invalid network magic: %d", header.NetworkMagic)
 			}
 			if header.PayloadLength > messageMaxPayloadLength {
@@ -363,4 +364,107 @@ func (p *Peer) GetBlock(hash [32]byte) (*handshake.Block, error) {
 	case <-time.After(5 * time.Second):
 		return nil, errors.New("timed out")
 	}
+}
+
+// SyncFunc is a callback function that takes a *handshake.Block, optionally returning its own error
+type SyncFunc func(*handshake.Block) error
+
+// Sync starts an async process to sync the blockchain, starting with the specified locator
+// and calling the specified callback for each fetched block or sync-related error
+func (p *Peer) Sync(locator [][32]byte, syncFunc SyncFunc) error {
+	if syncFunc == nil {
+		return errors.New("callback function must be provided")
+	}
+	// Use network genesis hash if no locator is provided
+	if len(locator) == 0 {
+		genesisHashBytes, err := hex.DecodeString(p.network.GenesisHash)
+		if err != nil {
+			return fmt.Errorf("decode genesis hash: %w", err)
+		}
+		locator = [][32]byte{
+			[32]byte(genesisHashBytes),
+		}
+	}
+	// Request Headers message instead of Inv for new headers at chain tip
+	if err := p.sendMessage(MessageSendHeaders, nil); err != nil {
+		return err
+	}
+	go func(locator [][32]byte) {
+		err := func() error {
+			nextLocator := locator
+			for {
+				// Initial sync
+				for {
+					headers, err := p.GetHeaders(
+						nextLocator,
+						// Empty hash for no stop
+						[32]byte{},
+					)
+					if err != nil {
+						return err
+					}
+					// Initial sync is done when we get no headers back
+					if len(headers) == 0 {
+						break
+					}
+					// Fetch block for each header
+					for _, header := range headers {
+						// Stop processing batch of headers if it doesn't fit on last known block
+						if nextLocator[0] != header.PrevBlock {
+							break
+						}
+						blk, err := p.GetBlock(header.Hash())
+						if err != nil {
+							return err
+						}
+						// Call user callback with block
+						if err := syncFunc(blk); err != nil {
+							return err
+						}
+						// Update locator for next iteration
+						nextLocator = [][32]byte{
+							header.Hash(),
+						}
+					}
+				}
+			newHeaderAnnounce:
+				// Wait for new header announcements
+				for {
+					select {
+					case msg := <-p.headersCh:
+						msgHeaders, ok := msg.(*MsgHeaders)
+						if !ok {
+							return fmt.Errorf("unexpected message: %T", msg)
+						}
+						// Fetch block for each header
+						for _, header := range msgHeaders.Headers {
+							// Switch back to initial sync mode if we get header that doesn't fit on last known block
+							if nextLocator[0] != header.PrevBlock {
+								break newHeaderAnnounce
+							}
+							blk, err := p.GetBlock(header.Hash())
+							if err != nil {
+								return err
+							}
+							// Call user callback with block
+							if err := syncFunc(blk); err != nil {
+								return err
+							}
+							// Update locator for next iteration
+							nextLocator = [][32]byte{
+								header.Hash(),
+							}
+						}
+					case <-p.doneCh:
+						return errors.New("connection has shut down")
+					}
+				}
+			}
+		}()
+		if err != nil {
+			p.errorCh <- err
+			_ = p.Close()
+		}
+	}(locator)
+	return nil
 }
