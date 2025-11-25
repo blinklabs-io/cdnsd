@@ -4,7 +4,7 @@
 // license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT.
 
-package protocol
+package handshake
 
 import (
 	"bytes"
@@ -12,8 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-
-	"github.com/blinklabs-io/cdnsd/internal/handshake"
 )
 
 // Message types
@@ -306,7 +304,7 @@ type MsgAddr struct {
 
 func (m *MsgAddr) Encode() []byte {
 	buf := new(bytes.Buffer)
-	uvarCount := handshake.WriteUvarint(uint64(len(m.Peers)))
+	uvarCount := WriteUvarint(uint64(len(m.Peers)))
 	_, _ = buf.Write(uvarCount)
 	for _, peer := range m.Peers {
 		peerBytes := peer.Encode()
@@ -316,7 +314,7 @@ func (m *MsgAddr) Encode() []byte {
 }
 
 func (m *MsgAddr) Decode(data []byte) error {
-	count, bytesRead, err := handshake.ReadUvarint(data)
+	count, bytesRead, err := ReadUvarint(data)
 	if err != nil {
 		return err
 	}
@@ -340,7 +338,7 @@ type MsgGetData struct {
 
 func (m *MsgGetData) Encode() []byte {
 	buf := new(bytes.Buffer)
-	uvarCount := handshake.WriteUvarint(uint64(len(m.Inventory)))
+	uvarCount := WriteUvarint(uint64(len(m.Inventory)))
 	_, _ = buf.Write(uvarCount)
 	for _, inv := range m.Inventory {
 		invBytes := inv.Encode()
@@ -350,7 +348,7 @@ func (m *MsgGetData) Encode() []byte {
 }
 
 func (m *MsgGetData) Decode(data []byte) error {
-	count, bytesRead, err := handshake.ReadUvarint(data)
+	count, bytesRead, err := ReadUvarint(data)
 	if err != nil {
 		return err
 	}
@@ -375,7 +373,7 @@ type MsgGetHeaders struct {
 
 func (m *MsgGetHeaders) Encode() []byte {
 	buf := new(bytes.Buffer)
-	locatorCount := handshake.WriteUvarint(uint64(len(m.Locator)))
+	locatorCount := WriteUvarint(uint64(len(m.Locator)))
 	_, _ = buf.Write(locatorCount)
 	for _, loc := range m.Locator {
 		_, _ = buf.Write(loc[:])
@@ -385,7 +383,7 @@ func (m *MsgGetHeaders) Encode() []byte {
 }
 
 func (m *MsgGetHeaders) Decode(data []byte) error {
-	count, bytesRead, err := handshake.ReadUvarint(data)
+	count, bytesRead, err := ReadUvarint(data)
 	if err != nil {
 		return err
 	}
@@ -404,12 +402,12 @@ func (m *MsgGetHeaders) Decode(data []byte) error {
 }
 
 type MsgHeaders struct {
-	Headers []*handshake.BlockHeader
+	Headers []*BlockHeader
 }
 
 func (m *MsgHeaders) Encode() []byte {
 	buf := new(bytes.Buffer)
-	headerCount := handshake.WriteUvarint(uint64(len(m.Headers)))
+	headerCount := WriteUvarint(uint64(len(m.Headers)))
 	_, _ = buf.Write(headerCount)
 	for _, header := range m.Headers {
 		_, _ = buf.Write(header.Encode())
@@ -418,23 +416,23 @@ func (m *MsgHeaders) Encode() []byte {
 }
 
 func (m *MsgHeaders) Decode(data []byte) error {
-	count, bytesRead, err := handshake.ReadUvarint(data)
+	count, bytesRead, err := ReadUvarint(data)
 	if err != nil {
 		return err
 	}
 	data = data[bytesRead:]
-	if len(data) != int(count*handshake.BlockHeaderSize) { // nolint:gosec
+	if len(data) != int(count*BlockHeaderSize) { // nolint:gosec
 		return errors.New("invalid payload length")
 	}
-	m.Headers = make([]*handshake.BlockHeader, count)
+	m.Headers = make([]*BlockHeader, count)
 	for i := range count {
-		tmpReader := bytes.NewReader(data[0:handshake.BlockHeaderSize])
-		tmpHeader, err := handshake.NewBlockHeaderFromReader(tmpReader)
+		tmpReader := bytes.NewReader(data[0:BlockHeaderSize])
+		tmpHeader, err := NewBlockHeaderFromReader(tmpReader)
 		if err != nil {
 			return err
 		}
 		m.Headers[i] = tmpHeader
-		data = data[handshake.BlockHeaderSize:]
+		data = data[BlockHeaderSize:]
 	}
 	return nil
 }
@@ -442,7 +440,7 @@ func (m *MsgHeaders) Decode(data []byte) error {
 type MsgSendHeaders struct{}
 
 type MsgBlock struct {
-	Block *handshake.Block
+	Block *Block
 }
 
 func (m *MsgBlock) Encode() []byte {
@@ -451,7 +449,7 @@ func (m *MsgBlock) Encode() []byte {
 }
 
 func (m *MsgBlock) Decode(data []byte) error {
-	blk, err := handshake.NewBlockFromReader(bytes.NewReader(data))
+	blk, err := NewBlockFromReader(bytes.NewReader(data))
 	if err != nil {
 		return err
 	}
@@ -483,7 +481,7 @@ func (m *MsgGetProof) Decode(data []byte) error {
 type MsgProof struct {
 	Root  [32]byte
 	Key   [32]byte
-	Proof *handshake.Proof
+	Proof *Proof
 }
 
 func (m *MsgProof) Encode() []byte {
@@ -498,7 +496,7 @@ func (m *MsgProof) Decode(data []byte) error {
 	}
 	m.Root = [32]byte(data[0:32])
 	m.Key = [32]byte(data[32:64])
-	var tmpProof handshake.Proof
+	var tmpProof Proof
 	if err := tmpProof.Decode(bytes.NewBuffer(data[64:])); err != nil {
 		return err
 	}

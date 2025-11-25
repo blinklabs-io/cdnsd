@@ -4,15 +4,13 @@
 // license that can be found in the LICENSE file or at
 // https://opensource.org/licenses/MIT.
 
-package protocol
+package handshake
 
 import (
 	"encoding/hex"
 	"net"
 	"reflect"
 	"testing"
-
-	"github.com/blinklabs-io/cdnsd/internal/handshake"
 )
 
 func TestMsgVersionEncodeDecode(t *testing.T) {
@@ -167,8 +165,8 @@ func TestMsgHeadersEncodeDecode(t *testing.T) {
 		{
 			binaryHex: "0232bb5134a541385e000000005b6ef2d3c1f3cdcadfd9a030ba1811efdd17740f14e166489760741d075992e00000000000000000000000000000000000000000000000000000000000000000000000150000000400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000059919422c20530ece2b328adf63ec3f35a10e79375731687a81dfa7cd83a24e728b17095216d5e211ba1f61031416a51efca54eacb8c9059440c4671b0625bbe00000000ffff001c0000000000000000000000000000000000000000000000000000000000000000032a8839c741385e000000000000000000a5e40e8ba291bd7e8649747fa7fb8a7af39f5bacdb7433cd2f59710000000000000000000000000000000000000000000000000000000000000000000000060000000c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000038180556e54cd70fd131130e154be4569945a6526d45add9ade6dbdfa34f54e25d1d56a37915cd1337b007806116ff623d973bec006280154472a6677eacbe0700000000ffff001c0000000000000000000000000000000000000000000000000000000000000000",
 			message: &MsgHeaders{
-				Headers: []*handshake.BlockHeader{
-					&handshake.BlockHeader{
+				Headers: []*BlockHeader{
+					&BlockHeader{
 						Nonce:        0x3451bb32,
 						Time:         0x5e3841a5,
 						PrevBlock:    [32]uint8{0x5b, 0x6e, 0xf2, 0xd3, 0xc1, 0xf3, 0xcd, 0xca, 0xdf, 0xd9, 0xa0, 0x30, 0xba, 0x18, 0x11, 0xef, 0xdd, 0x17, 0x74, 0xf, 0x14, 0xe1, 0x66, 0x48, 0x97, 0x60, 0x74, 0x1d, 0x7, 0x59, 0x92, 0xe0},
@@ -181,7 +179,7 @@ func TestMsgHeadersEncodeDecode(t *testing.T) {
 						Bits:         0x1c00ffff,
 						Mask:         [32]uint8{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0},
 					},
-					&handshake.BlockHeader{
+					&BlockHeader{
 						Nonce:        0x39882a03,
 						Time:         0x5e3841c7,
 						PrevBlock:    [32]uint8{0x0, 0x0, 0x0, 0x0, 0x0, 0xa5, 0xe4, 0xe, 0x8b, 0xa2, 0x91, 0xbd, 0x7e, 0x86, 0x49, 0x74, 0x7f, 0xa7, 0xfb, 0x8a, 0x7a, 0xf3, 0x9f, 0x5b, 0xac, 0xdb, 0x74, 0x33, 0xcd, 0x2f, 0x59, 0x71},
