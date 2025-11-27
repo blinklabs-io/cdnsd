@@ -99,6 +99,7 @@ func (p *Peer) Close() error {
 		return err
 	}
 	p.conn = nil
+	// Close done channel to signify shutdown
 	close(p.doneCh)
 	return nil
 }
@@ -106,6 +107,11 @@ func (p *Peer) Close() error {
 // ErrorChan returns the async error channel
 func (p *Peer) ErrorChan() <-chan error {
 	return p.errorCh
+}
+
+// DoneChan returns the shutdown channel
+func (p *Peer) DoneChan() <-chan struct{} {
+	return p.doneCh
 }
 
 // setupConnection runs the initial handshake and starts the receive loop
@@ -187,6 +193,12 @@ func (p *Peer) recvLoop() {
 		}
 	}()
 	if err != nil {
+		// Don't return an async error if we're already shutting down
+		select {
+		case <-p.doneCh:
+			return
+		default:
+		}
 		p.errorCh <- err
 		_ = p.Close()
 	}
@@ -473,6 +485,12 @@ func (p *Peer) Sync(locator [][32]byte, syncFunc SyncFunc) error {
 			}
 		}()
 		if err != nil {
+			// Don't return an async error if we're already shutting down
+			select {
+			case <-p.doneCh:
+				return
+			default:
+			}
 			p.errorCh <- err
 			_ = p.Close()
 		}

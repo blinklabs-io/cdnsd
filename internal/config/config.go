@@ -50,13 +50,14 @@ type MetricsConfig struct {
 }
 
 type IndexerConfig struct {
-	Network       string `yaml:"network"       envconfig:"INDEXER_NETWORK"`
-	NetworkMagic  uint32 `yaml:"networkMagic"  envconfig:"INDEXER_NETWORK_MAGIC"`
-	Address       string `yaml:"address"       envconfig:"INDEXER_TCP_ADDRESS"`
-	SocketPath    string `yaml:"socketPath"    envconfig:"INDEXER_SOCKET_PATH"`
-	InterceptHash string `yaml:"interceptHash" envconfig:"INDEXER_INTERCEPT_HASH"`
-	InterceptSlot uint64 `yaml:"interceptSlot" envconfig:"INDEXER_INTERCEPT_SLOT"`
-	Verify        bool   `yaml:"verify"        envconfig:"INDEXER_VERIFY"`
+	Network          string `yaml:"network"          envconfig:"INDEXER_NETWORK"`
+	NetworkMagic     uint32 `yaml:"networkMagic"     envconfig:"INDEXER_NETWORK_MAGIC"`
+	Address          string `yaml:"address"          envconfig:"INDEXER_TCP_ADDRESS"`
+	SocketPath       string `yaml:"socketPath"       envconfig:"INDEXER_SOCKET_PATH"`
+	InterceptHash    string `yaml:"interceptHash"    envconfig:"INDEXER_INTERCEPT_HASH"`
+	InterceptSlot    uint64 `yaml:"interceptSlot"    envconfig:"INDEXER_INTERCEPT_SLOT"`
+	Verify           bool   `yaml:"verify"           envconfig:"INDEXER_VERIFY"`
+	HandshakeAddress string `yaml:"handshakeAddress" envconfig:"INDEXER_HANDSHAKE_ADDRESS"`
 }
 
 type StateConfig struct {

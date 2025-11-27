@@ -9,6 +9,7 @@ package handshake
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 )
 
@@ -66,13 +67,13 @@ func (c *GenericCovenant) Covenant() Covenant {
 	case CovenantTypeRegister:
 		ret, err := NewRegisterCovenantFromGeneric(c)
 		if err != nil {
-			panic("can't convert generic covenant to Register")
+			panic(fmt.Sprintf("can't convert generic covenant to Register: %s", err))
 		}
 		return ret
 	case CovenantTypeUpdate:
 		ret, err := NewUpdateCovenantFromGeneric(c)
 		if err != nil {
-			panic("can't convert generic covenant to Update")
+			panic(fmt.Sprintf("can't convert generic covenant to Update: %s", err))
 		}
 		return ret
 	}
@@ -120,7 +121,6 @@ type UpdateCovenant struct {
 	NameHash     []byte
 	Height       uint32
 	ResourceData DomainResourceData
-	BlockHash    []byte
 }
 
 func (UpdateCovenant) isCovenant() {}
@@ -131,16 +131,14 @@ func NewUpdateCovenantFromGeneric(
 	if gc.Type != CovenantTypeUpdate {
 		return nil, errors.New("wrong covenant type")
 	}
-	if len(gc.Items) != 4 {
+	if len(gc.Items) != 3 {
 		return nil, errors.New("incorrect items length")
 	}
 	ret := &UpdateCovenant{
-		NameHash:  make([]byte, len(gc.Items[0])),
-		BlockHash: make([]byte, len(gc.Items[3])),
+		NameHash: make([]byte, len(gc.Items[0])),
 	}
 	// Copy hashes
 	copy(ret.NameHash, gc.Items[0])
-	copy(ret.BlockHash, gc.Items[3])
 	// Decode height from bytes
 	ret.Height = binary.LittleEndian.Uint32(gc.Items[1])
 	// Decode resource data
