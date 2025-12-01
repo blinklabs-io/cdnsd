@@ -13,6 +13,7 @@ import (
 
 	"github.com/blinklabs-io/cdnsd/internal/config"
 	"github.com/blinklabs-io/cdnsd/internal/handshake"
+	"github.com/blinklabs-io/cdnsd/internal/state"
 )
 
 type handshakeState struct {
@@ -112,10 +113,26 @@ func (i *Indexer) handshakeHandleSync(block *handshake.Block) error {
 		for _, output := range tx.Outputs {
 			cov := output.Covenant.Covenant()
 			switch c := cov.(type) {
+			case *handshake.OpenCovenant:
+				if err := state.GetState().AddHandshakeName(c.RawName); err != nil {
+					return err
+				}
+			case *handshake.ClaimCovenant:
+				if err := state.GetState().AddHandshakeName(c.RawName); err != nil {
+					return err
+				}
 			case *handshake.RegisterCovenant:
-				slog.Debug("Handshake domain registration", "resdata", c.ResourceData)
+				name, err := state.GetState().GetHandshakeNameByHash(c.NameHash)
+				if err != nil {
+					return err
+				}
+				slog.Debug("Handshake domain registration", "name", name, "resdata", c.ResourceData)
 			case *handshake.UpdateCovenant:
-				slog.Debug("Handshake domain update", "resdata", c.ResourceData)
+				name, err := state.GetState().GetHandshakeNameByHash(c.NameHash)
+				if err != nil {
+					return err
+				}
+				slog.Debug("Handshake domain update", "name", name, "resdata", c.ResourceData)
 			}
 		}
 	}

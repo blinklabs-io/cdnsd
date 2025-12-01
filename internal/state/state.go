@@ -8,6 +8,7 @@ package state
 
 import (
 	"bytes"
+	"crypto/sha3"
 	"encoding/gob"
 	"encoding/json"
 	"errors"
@@ -26,6 +27,10 @@ const (
 	chainsyncCursorKey = "chainsync_cursor"
 	discoveredAddrKey  = "discovered_addresses"
 	fingerprintKey     = "config_fingerprint"
+
+	recordKeyPrefix            = "r_"
+	domainKeyPrefix            = "d_"
+	handshakeNameHashKeyPrefix = "hs_name_hash_"
 )
 
 type State struct {
@@ -222,7 +227,8 @@ func (s *State) UpdateDomain(
 		recordKeys := make([]string, 0)
 		for recordIdx, record := range records {
 			key := fmt.Sprintf(
-				"r_%s_%s_%d",
+				"%s%s_%s_%d",
+				recordKeyPrefix,
 				strings.ToUpper(record.Type),
 				strings.Trim(record.Lhs, `.`),
 				recordIdx,
@@ -248,7 +254,7 @@ func (s *State) UpdateDomain(
 			)
 		}
 		// Delete old records in tracking key that are no longer present after this update
-		domainRecordsKey := fmt.Appendf(nil, "d_%s_records", domainName)
+		domainRecordsKey := fmt.Appendf(nil, "%s%s_records", domainKeyPrefix, domainName)
 		domainRecordsItem, err := txn.Get(domainRecordsKey)
 		if err != nil {
 			if !errors.Is(err, badger.ErrKeyNotFound) {
@@ -291,7 +297,8 @@ func (s *State) LookupRecords(
 		for _, recordType := range recordTypes {
 			keyPrefix := fmt.Appendf(
 				nil,
-				"r_%s_%s_",
+				"%s%s_%s_",
+				recordKeyPrefix,
 				strings.ToUpper(recordType),
 				recordName,
 			)
@@ -320,6 +327,42 @@ func (s *State) LookupRecords(
 	}
 	if len(ret) == 0 {
 		return nil, nil
+	}
+	return ret, nil
+}
+
+func (s *State) AddHandshakeName(name string) error {
+	nameHash := sha3.Sum256([]byte(name))
+	nameHashKey := fmt.Sprintf("%s%x", handshakeNameHashKeyPrefix, nameHash)
+	err := s.db.Update(func(txn *badger.Txn) error {
+		return txn.Set(
+			[]byte(nameHashKey),
+			[]byte(name),
+		)
+	})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *State) GetHandshakeNameByHash(nameHash []byte) (string, error) {
+	var ret string
+	nameHashKey := fmt.Sprintf("%s%x", handshakeNameHashKeyPrefix, nameHash)
+	err := s.db.View(func(txn *badger.Txn) error {
+		item, err := txn.Get([]byte(nameHashKey))
+		if err != nil {
+			return err
+		}
+		val, err := item.ValueCopy(nil)
+		if err != nil {
+			return err
+		}
+		ret = string(val)
+		return nil
+	})
+	if err != nil {
+		return "", err
 	}
 	return ret, nil
 }
