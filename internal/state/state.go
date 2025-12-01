@@ -28,9 +28,11 @@ const (
 	discoveredAddrKey  = "discovered_addresses"
 	fingerprintKey     = "config_fingerprint"
 
-	recordKeyPrefix            = "r_"
-	domainKeyPrefix            = "d_"
+	cardanoRecordKeyPrefix     = "r_"
+	cardanoDomainKeyPrefix     = "d_"
 	handshakeNameHashKeyPrefix = "hs_name_hash_"
+	handshakeDomainKeyPrefix   = "hs_d_"
+	handshakeRecordKeyPrefix   = "hs_r_"
 )
 
 type State struct {
@@ -222,6 +224,20 @@ func (s *State) UpdateDomain(
 	domainName string,
 	records []DomainRecord,
 ) error {
+	return s.updateDomain(
+		domainName,
+		records,
+		cardanoDomainKeyPrefix,
+		cardanoRecordKeyPrefix,
+	)
+}
+
+func (s *State) updateDomain(
+	domainName string,
+	records []DomainRecord,
+	domainKeyPrefix string,
+	recordKeyPrefix string,
+) error {
 	err := s.db.Update(func(txn *badger.Txn) error {
 		// Add new records
 		recordKeys := make([]string, 0)
@@ -290,6 +306,18 @@ func (s *State) UpdateDomain(
 func (s *State) LookupRecords(
 	recordTypes []string,
 	recordName string,
+) ([]DomainRecord, error) {
+	return s.lookupRecords(
+		recordTypes,
+		recordName,
+		cardanoRecordKeyPrefix,
+	)
+}
+
+func (s *State) lookupRecords(
+	recordTypes []string,
+	recordName string,
+	recordKeyPrefix string,
 ) ([]DomainRecord, error) {
 	ret := []DomainRecord{}
 	recordName = strings.Trim(recordName, `.`)
@@ -365,6 +393,29 @@ func (s *State) GetHandshakeNameByHash(nameHash []byte) (string, error) {
 		return "", err
 	}
 	return ret, nil
+}
+
+func (s *State) UpdateHandshakeDomain(
+	domainName string,
+	records []DomainRecord,
+) error {
+	return s.updateDomain(
+		domainName,
+		records,
+		handshakeDomainKeyPrefix,
+		handshakeRecordKeyPrefix,
+	)
+}
+
+func (s *State) LookupHandshakeRecords(
+	recordTypes []string,
+	recordName string,
+) ([]DomainRecord, error) {
+	return s.lookupRecords(
+		recordTypes,
+		recordName,
+		handshakeRecordKeyPrefix,
+	)
 }
 
 func GetState() *State {

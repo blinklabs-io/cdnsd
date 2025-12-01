@@ -7,6 +7,7 @@
 package indexer
 
 import (
+	"encoding/base32"
 	"fmt"
 	"log/slog"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/blinklabs-io/cdnsd/internal/config"
 	"github.com/blinklabs-io/cdnsd/internal/handshake"
 	"github.com/blinklabs-io/cdnsd/internal/state"
+	"github.com/miekg/dns"
 )
 
 type handshakeState struct {
@@ -127,14 +129,164 @@ func (i *Indexer) handshakeHandleSync(block *handshake.Block) error {
 					return err
 				}
 				slog.Debug("Handshake domain registration", "name", name, "resdata", c.ResourceData)
+				records, err := handshakeResourceDataToDomainRecords(name, c.ResourceData)
+				if err != nil {
+					return err
+				}
+				if err := state.GetState().UpdateHandshakeDomain(name, records); err != nil {
+					return err
+				}
 			case *handshake.UpdateCovenant:
 				name, err := state.GetState().GetHandshakeNameByHash(c.NameHash)
 				if err != nil {
 					return err
 				}
 				slog.Debug("Handshake domain update", "name", name, "resdata", c.ResourceData)
+				records, err := handshakeResourceDataToDomainRecords(name, c.ResourceData)
+				if err != nil {
+					return err
+				}
+				if err := state.GetState().UpdateHandshakeDomain(name, records); err != nil {
+					return err
+				}
 			}
 		}
 	}
 	return nil
+}
+
+func handshakeResourceDataToDomainRecords(domainName string, resData handshake.DomainResourceData) ([]state.DomainRecord, error) {
+	// The return may be larger than this, but it will be at least as large
+	ret := make([]state.DomainRecord, 0, len(resData.Records))
+	for _, record := range resData.Records {
+		switch r := record.(type) {
+		case *handshake.DsDomainRecord:
+			ret = append(
+				ret,
+				state.DomainRecord{
+					Lhs:  dns.CanonicalName(domainName),
+					Type: "DS",
+					Rhs: fmt.Sprintf(
+						"%d %d %d %x",
+						r.KeyTag,
+						r.Algorithm,
+						r.DigestType,
+						r.Digest,
+					),
+				},
+			)
+		case *handshake.NsDomainRecord:
+			ret = append(
+				ret,
+				state.DomainRecord{
+					Lhs:  dns.CanonicalName(domainName),
+					Type: "NS",
+					Rhs:  r.Name,
+				},
+			)
+		case *handshake.Glue4DomainRecord:
+			ret = append(
+				ret,
+				state.DomainRecord{
+					Lhs:  dns.CanonicalName(domainName),
+					Type: "NS",
+					Rhs:  r.Name,
+				},
+			)
+			ret = append(
+				ret,
+				state.DomainRecord{
+					Lhs:  dns.CanonicalName(r.Name),
+					Type: "A",
+					Rhs:  r.Address.String(),
+				},
+			)
+		case *handshake.Glue6DomainRecord:
+			ret = append(
+				ret,
+				state.DomainRecord{
+					Lhs:  dns.CanonicalName(domainName),
+					Type: "NS",
+					Rhs:  r.Name,
+				},
+			)
+			ret = append(
+				ret,
+				state.DomainRecord{
+					Lhs:  dns.CanonicalName(r.Name),
+					Type: "AAAA",
+					Rhs:  r.Address.String(),
+				},
+			)
+		case *handshake.Synth4DomainRecord:
+			ip4 := r.Address.To4()
+			if ip4 == nil {
+				return nil, fmt.Errorf("Synth4 record has invalid IPv4 address: %s", r.Address.String())
+			}
+			nsName := fmt.Sprintf(
+				"_%s._synth.",
+				base32.HexEncoding.EncodeToString(
+					ip4,
+				),
+			)
+			ret = append(
+				ret,
+				state.DomainRecord{
+					Lhs:  dns.CanonicalName(domainName),
+					Type: "NS",
+					Rhs:  nsName,
+				},
+			)
+			ret = append(
+				ret,
+				state.DomainRecord{
+					Lhs:  nsName,
+					Type: "A",
+					Rhs:  r.Address.String(),
+				},
+			)
+		case *handshake.Synth6DomainRecord:
+			nsName := fmt.Sprintf(
+				"_%s._synth.",
+				base32.HexEncoding.EncodeToString(
+					r.Address,
+				),
+			)
+			ret = append(
+				ret,
+				state.DomainRecord{
+					Lhs:  dns.CanonicalName(domainName),
+					Type: "NS",
+					Rhs:  nsName,
+				},
+			)
+			ret = append(
+				ret,
+				state.DomainRecord{
+					Lhs:  nsName,
+					Type: "AAAA",
+					Rhs:  r.Address.String(),
+				},
+			)
+		case *handshake.TextDomainRecord:
+			var txtVal string
+			for _, item := range r.Items {
+				if txtVal != "" {
+					txtVal += " "
+				}
+				txtVal += `"` + string(item) + `"`
+			}
+			ret = append(
+				ret,
+				state.DomainRecord{
+					Lhs:  dns.CanonicalName(domainName),
+					Type: "TXT",
+					Rhs:  txtVal,
+				},
+			)
+		default:
+			return nil, fmt.Errorf("unsupported record type: %T", record)
+		}
+	}
+	return ret, nil
 }
