@@ -9,7 +9,7 @@ package handshake_test
 import (
 	"testing"
 
-	"github.com/blinklabs-io/cdnsd/internal/handshake"
+	"github.com/blinklabs-io/cdnsd/handshake"
 )
 
 func TestVerifySpvProof(t *testing.T) {

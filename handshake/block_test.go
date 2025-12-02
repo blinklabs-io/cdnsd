@@ -12,7 +12,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/blinklabs-io/cdnsd/internal/handshake"
+	"github.com/blinklabs-io/cdnsd/handshake"
 )
 
 func decodeHex(hexData string) []byte {

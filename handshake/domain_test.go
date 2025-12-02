@@ -11,7 +11,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/blinklabs-io/cdnsd/internal/handshake"
+	"github.com/blinklabs-io/cdnsd/handshake"
 )
 
 func TestDomainResourceData(t *testing.T) {
