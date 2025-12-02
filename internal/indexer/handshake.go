@@ -8,6 +8,8 @@ package indexer
 
 import (
 	"encoding/base32"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -22,7 +24,6 @@ type handshakeState struct {
 	peer             *handshake.Peer
 	peerAddress      string
 	peerBackoffDelay time.Duration
-	blockHeight      int
 }
 
 func (i *Indexer) startHandshake() error {
@@ -59,8 +60,30 @@ func (i *Indexer) handshakeConnectPeer() error {
 			// Stop waiting on connection shutdown
 		}
 	}()
+	var locator [][32]byte = nil
+	cursorBlockHash, err := state.GetState().GetHandshakeCursor()
+	if err != nil {
+		return err
+	}
+	if cursorBlockHash != "" {
+		slog.Info(
+			"found previous Handshake cursor: " + cursorBlockHash,
+		)
+		hashBytes, err := hex.DecodeString(cursorBlockHash)
+		if err != nil {
+			return err
+		}
+		if len(hashBytes) != 32 {
+			// This isn't a condition we can really recover from, since it implies database corruption
+			slog.Error(
+				fmt.Sprintf("bad Handshake cursor block hash: %x", hashBytes),
+			)
+			return errors.New("bad Handshake locator")
+		}
+		locator = [][32]byte{[32]byte(hashBytes)}
+	}
 	// Start sync
-	if err := i.handshakeState.peer.Sync(nil, i.handshakeHandleSync); err != nil {
+	if err := i.handshakeState.peer.Sync(locator, i.handshakeHandleSync); err != nil {
 		_ = i.handshakeState.peer.Close()
 		return err
 	}
@@ -102,10 +125,8 @@ func (i *Indexer) handshakeReconnectPeer() {
 }
 
 func (i *Indexer) handshakeHandleSync(block *handshake.Block) error {
-	i.handshakeState.blockHeight++
 	slog.Debug(
 		"synced Handshake block",
-		"height", i.handshakeState.blockHeight,
 		"hash", fmt.Sprintf("%x", block.Hash()),
 		"prevHash", fmt.Sprintf("%x", block.Header.PrevBlock),
 	)
@@ -151,6 +172,11 @@ func (i *Indexer) handshakeHandleSync(block *handshake.Block) error {
 				}
 			}
 		}
+	}
+	// Update cursor
+	blockHash := block.Hash()
+	if err := state.GetState().UpdateHandshakeCursor(hex.EncodeToString(blockHash[:])); err != nil {
+		return err
 	}
 	return nil
 }

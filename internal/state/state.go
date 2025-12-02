@@ -27,6 +27,7 @@ const (
 	chainsyncCursorKey = "chainsync_cursor"
 	discoveredAddrKey  = "discovered_addresses"
 	fingerprintKey     = "config_fingerprint"
+	handshakeCursorKey = "handshake_cursor"
 
 	cardanoRecordKeyPrefix     = "r_"
 	cardanoDomainKeyPrefix     = "d_"
@@ -357,6 +358,36 @@ func (s *State) lookupRecords(
 		return nil, nil
 	}
 	return ret, nil
+}
+
+func (s *State) UpdateHandshakeCursor(blockHash string) error {
+	err := s.db.Update(func(txn *badger.Txn) error {
+		if err := txn.Set([]byte(handshakeCursorKey), []byte(blockHash)); err != nil {
+			return err
+		}
+		return nil
+	})
+	return err
+}
+
+func (s *State) GetHandshakeCursor() (string, error) {
+	var blockHash string
+	err := s.db.View(func(txn *badger.Txn) error {
+		item, err := txn.Get([]byte(handshakeCursorKey))
+		if err != nil {
+			return err
+		}
+		val, err := item.ValueCopy(nil)
+		if err != nil {
+			return err
+		}
+		blockHash = string(val)
+		return nil
+	})
+	if errors.Is(err, badger.ErrKeyNotFound) {
+		return "", nil
+	}
+	return blockHash, err
 }
 
 func (s *State) AddHandshakeName(name string) error {
