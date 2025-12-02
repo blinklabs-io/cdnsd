@@ -11,7 +11,7 @@ import (
 	"encoding/hex"
 	"testing"
 
-	"github.com/blinklabs-io/cdnsd/internal/handshake"
+	"github.com/blinklabs-io/cdnsd/handshake"
 )
 
 func TestTransactionHash(t *testing.T) {

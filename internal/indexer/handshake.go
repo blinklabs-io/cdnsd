@@ -11,8 +11,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/blinklabs-io/cdnsd/handshake"
 	"github.com/blinklabs-io/cdnsd/internal/config"
-	"github.com/blinklabs-io/cdnsd/internal/handshake"
 	"github.com/blinklabs-io/cdnsd/internal/state"
 )
 
