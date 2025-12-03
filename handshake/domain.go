@@ -107,11 +107,17 @@ recordLoop:
 		if record != nil {
 			err = record.decode(r)
 			if err != nil {
-				return fmt.Errorf("decode record: %w", err)
+				// Stop processing on record decode failure
+				// Don't return an error, because we want to return whatever records
+				// that we were able to process successfully
+				break recordLoop
 			}
 		}
 		d.Records = append(d.Records, record)
 	}
+	// golangci-lint doesn't like it that we break out of the loop on decode error but
+	// return a nil error here
+	// nolint:nilerr
 	return nil
 }
 
