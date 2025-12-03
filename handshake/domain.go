@@ -70,18 +70,19 @@ func (d *DomainResourceData) decode(data []byte) error {
 	var err error
 	// Version
 	if err = binary.Read(r, binary.LittleEndian, &d.Version); err != nil {
-		return err
+		return fmt.Errorf("read version: %w", err)
 	}
 	// Records
 	var recordType uint8
 	var record DomainRecord
+recordLoop:
 	for {
 		// Read record type
 		if err = binary.Read(r, binary.LittleEndian, &recordType); err != nil {
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			return err
+			return fmt.Errorf("read record type: %w", err)
 		}
 		switch recordType {
 		case RecordTypeDS:
@@ -99,12 +100,14 @@ func (d *DomainResourceData) decode(data []byte) error {
 		case RecordTypeTEXT:
 			record = &TextDomainRecord{}
 		default:
-			return fmt.Errorf("unsupported record type %d", recordType)
+			// Stop processing on unknown record type
+			// This matches the behavior of hsd
+			break recordLoop
 		}
 		if record != nil {
 			err = record.decode(r)
 			if err != nil {
-				return err
+				return fmt.Errorf("decode record: %w", err)
 			}
 		}
 		d.Records = append(d.Records, record)
