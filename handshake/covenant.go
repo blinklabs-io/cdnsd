@@ -355,11 +355,13 @@ func NewRegisterCovenantFromGeneric(
 	// Decode height from bytes
 	ret.Height = binary.LittleEndian.Uint32(gc.Items[1])
 	// Decode resource data
-	tmpData, err := NewDomainResourceDataFromBytes(gc.Items[2])
-	if err != nil {
-		return nil, err
+	if len(gc.Items[2]) > 0 {
+		tmpData, err := NewDomainResourceDataFromBytes(gc.Items[2])
+		if err != nil {
+			return nil, err
+		}
+		ret.ResourceData = *tmpData
 	}
-	ret.ResourceData = *tmpData
 	return ret, nil
 }
 
@@ -391,11 +393,13 @@ func NewUpdateCovenantFromGeneric(
 	// Decode height from bytes
 	ret.Height = binary.LittleEndian.Uint32(gc.Items[1])
 	// Decode resource data
-	tmpData, err := NewDomainResourceDataFromBytes(gc.Items[2])
-	if err != nil {
-		return nil, err
+	if len(gc.Items[2]) > 0 {
+		tmpData, err := NewDomainResourceDataFromBytes(gc.Items[2])
+		if err != nil {
+			return nil, fmt.Errorf("decode domain resource data: %w", err)
+		}
+		ret.ResourceData = *tmpData
 	}
-	ret.ResourceData = *tmpData
 	return ret, nil
 }
 
