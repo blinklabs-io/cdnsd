@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/blinklabs-io/cdnsd/handshake"
@@ -249,10 +250,13 @@ func handshakeResourceDataToDomainRecords(domainName string, resData handshake.D
 			if ip4 == nil {
 				return nil, fmt.Errorf("Synth4 record has invalid IPv4 address: %s", r.Address.String())
 			}
+			base32Enc := base32.HexEncoding.WithPadding(base32.NoPadding)
 			nsName := fmt.Sprintf(
 				"_%s._synth.",
-				base32.HexEncoding.EncodeToString(
-					ip4,
+				strings.ToLower(
+					base32Enc.EncodeToString(
+						ip4,
+					),
 				),
 			)
 			ret = append(
@@ -272,10 +276,13 @@ func handshakeResourceDataToDomainRecords(domainName string, resData handshake.D
 				},
 			)
 		case *handshake.Synth6DomainRecord:
+			base32Enc := base32.HexEncoding.WithPadding(base32.NoPadding)
 			nsName := fmt.Sprintf(
 				"_%s._synth.",
-				base32.HexEncoding.EncodeToString(
-					r.Address,
+				strings.ToLower(
+					base32Enc.EncodeToString(
+						r.Address,
+					),
 				),
 			)
 			ret = append(
