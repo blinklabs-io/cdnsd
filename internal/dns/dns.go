@@ -113,6 +113,7 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 		lookupRecordTypes = append(lookupRecordTypes, dns.TypeCNAME)
 	}
 	for _, lookupRecordType := range lookupRecordTypes {
+		// Try Cardano
 		records, err := state.GetState().LookupRecords(
 			[]string{dns.Type(lookupRecordType).String()},
 			strings.TrimSuffix(r.Question[0].Name, "."),
@@ -122,6 +123,19 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 				fmt.Sprintf("failed to lookup records in state: %s", err),
 			)
 			return
+		}
+		// Try Handshake
+		if records == nil {
+			records, err = state.GetState().LookupHandshakeRecords(
+				[]string{dns.Type(lookupRecordType).String()},
+				strings.TrimSuffix(r.Question[0].Name, "."),
+			)
+			if err != nil {
+				slog.Error(
+					fmt.Sprintf("failed to lookup records in state: %s", err),
+				)
+				return
+			}
 		}
 		if records != nil {
 			// Assemble response
@@ -414,6 +428,7 @@ func findNameserversForDomain(
 		lookupDomainName := strings.Join(queryLabels[startLabelIdx:], ".")
 		// Convert to canonical form for consistency
 		lookupDomainName = dns.CanonicalName(lookupDomainName)
+		// Try Cardano
 		nsRecords, err := state.GetState().
 			LookupRecords([]string{"NS"}, lookupDomainName)
 		if err != nil {
@@ -425,6 +440,30 @@ func findNameserversForDomain(
 				// Get matching A/AAAA records for NS entry
 				aRecords, err := state.GetState().
 					LookupRecords([]string{"A", "AAAA"}, nsRecord.Rhs)
+				if err != nil {
+					return "", nil, err
+				}
+				for _, aRecord := range aRecords {
+					ret[nsRecord.Rhs] = append(
+						ret[nsRecord.Rhs],
+						net.ParseIP(aRecord.Rhs),
+					)
+				}
+			}
+			return dns.Fqdn(lookupDomainName), ret, nil
+		}
+		// Try Handshake
+		nsRecords, err = state.GetState().
+			LookupHandshakeRecords([]string{"NS"}, lookupDomainName)
+		if err != nil {
+			return "", nil, err
+		}
+		if len(nsRecords) > 0 {
+			ret := map[string][]net.IP{}
+			for _, nsRecord := range nsRecords {
+				// Get matching A/AAAA records for NS entry
+				aRecords, err := state.GetState().
+					LookupHandshakeRecords([]string{"A", "AAAA"}, nsRecord.Rhs)
 				if err != nil {
 					return "", nil, err
 				}
