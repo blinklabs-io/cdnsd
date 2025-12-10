@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"net"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -444,9 +445,16 @@ func findNameserversForDomain(
 					return "", nil, err
 				}
 				for _, aRecord := range aRecords {
+					tmpIp := net.ParseIP(aRecord.Rhs)
+					// Skip duplicate IPs
+					if slices.ContainsFunc(ret[nsRecord.Rhs], func(x net.IP) bool {
+						return x.Equal(tmpIp)
+					}) {
+						continue
+					}
 					ret[nsRecord.Rhs] = append(
 						ret[nsRecord.Rhs],
-						net.ParseIP(aRecord.Rhs),
+						tmpIp,
 					)
 				}
 			}
@@ -468,9 +476,16 @@ func findNameserversForDomain(
 					return "", nil, err
 				}
 				for _, aRecord := range aRecords {
+					tmpIp := net.ParseIP(aRecord.Rhs)
+					// Skip duplicate IPs
+					if slices.ContainsFunc(ret[nsRecord.Rhs], func(x net.IP) bool {
+						return x.Equal(tmpIp)
+					}) {
+						continue
+					}
 					ret[nsRecord.Rhs] = append(
 						ret[nsRecord.Rhs],
-						net.ParseIP(aRecord.Rhs),
+						tmpIp,
 					)
 				}
 			}
