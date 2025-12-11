@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"net"
 	"os"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -30,6 +31,8 @@ var metricQueryTotal = promauto.NewCounter(prometheus.CounterOpts{
 	Help: "total DNS queries handled",
 })
 
+var rootHints map[uint16]map[string][]dns.RR
+
 func Start() error {
 	cfg := config.GetConfig()
 	listenAddr := fmt.Sprintf(
@@ -40,6 +43,10 @@ func Start() error {
 	slog.Info(
 		"starting DNS listener on " + listenAddr,
 	)
+	// Load root hints
+	if err := loadRootHints(cfg); err != nil {
+		return err
+	}
 	// Setup handler
 	dns.HandleFunc(".", handleQuery)
 	// UDP listener
@@ -72,6 +79,27 @@ func Start() error {
 			ReusePort:  false,
 		}
 		go startListener(serverTls)
+	}
+	return nil
+}
+
+func loadRootHints(cfg *config.Config) error {
+	commentRe := regexp.MustCompile(`^\s*;`)
+	rootHints := make(map[uint16]map[string]dns.RR)
+	for line := range strings.SplitSeq(cfg.Dns.RootHints, "\n") {
+		// Skip comments
+		if commentRe.Match([]byte(line)) {
+			continue
+		}
+		tmpRR, err := dns.NewRR(line)
+		if err != nil {
+			return err
+		}
+		rrType := tmpRR.Header().Rrtype
+		if _, ok := rootHints[rrType]; !ok {
+			rootHints[rrType] = make(map[string]dns.RR)
+		}
+		rootHints[rrType][tmpRR.Header().Name] = tmpRR
 	}
 	return nil
 }
@@ -492,8 +520,18 @@ func findNameserversForDomain(
 			return dns.Fqdn(lookupDomainName), ret, nil
 		}
 	}
-
-	return "", nil, nil
+	// Return root hints
+	ret := map[string][]net.IP{}
+	for _, tmpRecord := range rootHints[dns.TypeNS][`.`] {
+		nsRec := tmpRecord.(*dns.NS).Ns
+		for _, aRecord := range rootHints[dns.TypeA][nsRec] {
+			ret[`.`] = append(ret[`.`], aRecord.(*dns.A).A)
+		}
+		for _, aaaaRecord := range rootHints[dns.TypeAAAA][nsRec] {
+			ret[`.`] = append(ret[`.`], aaaaRecord.(*dns.AAAA).AAAA)
+		}
+	}
+	return `.`, ret, nil
 }
 
 func getNameserversFromResponse(msg *dns.Msg) map[string][]net.IP {
