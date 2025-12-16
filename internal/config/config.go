@@ -7,6 +7,7 @@
 package config
 
 import (
+	_ "embed"
 	"fmt"
 	"os"
 	"strings"
@@ -36,6 +37,8 @@ type DnsConfig struct {
 	ListenPort       uint     `yaml:"port"             envconfig:"DNS_LISTEN_PORT"`
 	ListenTlsPort    uint     `yaml:"tlsPort"          envconfig:"DNS_LISTEN_TLS_PORT"`
 	RecursionEnabled bool     `yaml:"recursionEnabled" envconfig:"DNS_RECURSION"`
+	RootHints        string   `yaml:"rootHints"        envconfig:"DNS_ROOT_HINTS"`
+	RootHintsFile    string   `yaml:"rootHintsFile"    envconfig:"DNS_ROOT_HINTS_FILE"`
 	FallbackServers  []string `yaml:"fallbackServers"  envconfig:"DNS_FALLBACK_SERVERS"`
 }
 
@@ -69,6 +72,9 @@ type TlsConfig struct {
 	KeyFilePath  string `yaml:"keyFilePath"  envconfig:"TLS_KEY_FILE_PATH"`
 }
 
+//go:embed named.root
+var defaultRootHints []byte
+
 // Singleton config instance with default values
 var globalConfig = &Config{
 	Logging: LoggingConfig{
@@ -78,6 +84,7 @@ var globalConfig = &Config{
 		ListenAddress: "",
 		ListenPort:    8053,
 		ListenTlsPort: 8853,
+		RootHints:     string(defaultRootHints),
 		// hdns.io
 		FallbackServers: []string{
 			"103.196.38.38",
@@ -169,6 +176,14 @@ func Load(configFile string) (*Config, error) {
 			globalConfig.Indexer.InterceptHash = interceptHash
 			globalConfig.Indexer.InterceptSlot = interceptSlot
 		}
+	}
+	// Load root hints
+	if globalConfig.Dns.RootHintsFile != "" {
+		hintsContent, err := os.ReadFile(globalConfig.Dns.RootHintsFile)
+		if err != nil {
+			return nil, err
+		}
+		globalConfig.Dns.RootHints = string(hintsContent)
 	}
 	return globalConfig, nil
 }
