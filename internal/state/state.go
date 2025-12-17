@@ -336,6 +336,12 @@ func (s *State) lookupRecords(
 			defer it.Close()
 			for it.Seek(keyPrefix); it.ValidForPrefix(keyPrefix); it.Next() {
 				item := it.Item()
+				// Skip keys that don't have a purely numeric suffix
+				// This means that they don't belong to the domain we are looking for
+				keySuffix := item.Key()[len(keyPrefix):]
+				if _, err := strconv.Atoi(string(keySuffix)); err != nil {
+					continue
+				}
 				val, err := item.ValueCopy(nil)
 				if err != nil {
 					return err
