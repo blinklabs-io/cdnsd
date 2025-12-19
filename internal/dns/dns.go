@@ -362,9 +362,24 @@ func copyResponse(req *dns.Msg, srcResp *dns.Msg, destResp *dns.Msg) {
 
 func randomNameserverAddress(nameservers map[string][]net.IP) net.IP {
 	// Put all namserver addresses in single list
-	tmpNameservers := []net.IP{}
+	tmpNameserversIpv4 := []net.IP{}
+	tmpNameserversIpv6 := []net.IP{}
 	for _, addresses := range nameservers {
-		tmpNameservers = append(tmpNameservers, addresses...)
+		for _, address := range addresses {
+			if ip := address.To4(); ip != nil {
+				tmpNameserversIpv4 = append(tmpNameserversIpv4, address)
+			} else {
+				tmpNameserversIpv6 = append(tmpNameserversIpv6, address)
+			}
+		}
+	}
+	// Collect only IPv4 addresses unless we only have IPv6
+	// We can't guarantee that IPv6 works, so we try not to use it
+	var tmpNameservers []net.IP
+	if len(tmpNameserversIpv4) > 0 {
+		tmpNameservers = tmpNameserversIpv4
+	} else {
+		tmpNameservers = tmpNameserversIpv6
 	}
 	if len(tmpNameservers) > 0 {
 		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(tmpNameservers))))
@@ -383,8 +398,8 @@ func doQuery(msg *dns.Msg, address string, recursive bool) (*dns.Msg, error) {
 		address = randomFallbackServer()
 	}
 	// Add default port to address if there is none
-	if !strings.Contains(address, ":") {
-		address = address + `:53`
+	if _, _, err := net.SplitHostPort(address); err != nil {
+		address = net.JoinHostPort(address, `53`)
 	}
 	slog.Debug(
 		fmt.Sprintf(
@@ -417,22 +432,12 @@ func doQuery(msg *dns.Msg, address string, recursive bool) (*dns.Msg, error) {
 	if recursive {
 		if len(resp.Ns) > 0 {
 			nameservers := getNameserversFromResponse(resp)
-			randNsName, randNsAddress := randomNameserver(nameservers)
-			if randNsAddress == "" {
-				m := createQuery(randNsName, dns.TypeA)
-				// XXX: should this query the fallback servers or the server that gave us the NS response?
-				resp, err := doQuery(m, "", false)
-				if err != nil {
-					return nil, err
-				}
-				randNsAddress = getAddressForNameFromResponse(resp, randNsName)
-				if randNsAddress == "" {
-					// Return the current response if we couldn't get an address for the nameserver
-					return resp, nil
-				}
+			randNsAddress := randomNameserverAddress(nameservers)
+			if randNsAddress == nil {
+				return nil, errors.New("could not get nameservers from response")
 			}
 			// Perform recursive query
-			return doQuery(msg, randNsAddress, true)
+			return doQuery(msg, randNsAddress.String(), true)
 		} else {
 			// Return the current response if there is no authority information
 			return resp, nil
@@ -571,70 +576,6 @@ func getNameserversFromResponse(msg *dns.Msg) map[string][]net.IP {
 		}
 	}
 	return ret
-}
-
-func getAddressForNameFromResponse(msg *dns.Msg, recordName string) string {
-	var retRR dns.RR
-	for _, answer := range msg.Answer {
-		if answer.Header().Name == recordName {
-			retRR = answer
-			break
-		}
-	}
-	if retRR == nil {
-		for _, extra := range msg.Extra {
-			if extra.Header().Name == recordName {
-				retRR = extra
-				break
-			}
-		}
-	}
-	if retRR == nil {
-		return ""
-	}
-	switch v := retRR.(type) {
-	case *dns.A:
-		if v.A != nil {
-			return v.A.String()
-		}
-	case *dns.AAAA:
-		if v.AAAA != nil {
-			return v.AAAA.String()
-		}
-	}
-	return ""
-}
-
-func randomNameserver(nameservers map[string][]net.IP) (string, string) {
-	mapKeys := []string{}
-	for k := range nameservers {
-		mapKeys = append(mapKeys, k)
-	}
-	if len(mapKeys) > 0 {
-		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(mapKeys))))
-		if err != nil {
-			return "", ""
-		}
-		randNsName := mapKeys[n.Int64()]
-		randNsAddresses := nameservers[randNsName]
-		if randNsAddresses == nil {
-			return "", ""
-		}
-		n, err = rand.Int(rand.Reader, big.NewInt(int64(len(randNsAddresses))))
-		if err != nil {
-			return "", ""
-		}
-		randNsAddress := randNsAddresses[n.Int64()].String()
-		return randNsName, randNsAddress
-	}
-	return "", ""
-}
-
-func createQuery(recordName string, recordType uint16) *dns.Msg {
-	m := new(dns.Msg)
-	m.SetQuestion(recordName, recordType)
-	m.RecursionDesired = false
-	return m
 }
 
 func randomFallbackServer() string {
