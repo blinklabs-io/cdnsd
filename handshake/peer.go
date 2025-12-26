@@ -24,6 +24,8 @@ const (
 	protocolVersion            = 1
 	protocolUserAgent          = "/cdnsd/"
 	protocolServicesNoServices = 0
+
+	maxBlockHeaders = 2000
 )
 
 // Peer represents a connection with a network peer
@@ -415,26 +417,33 @@ func (p *Peer) Sync(locator [][32]byte, syncFunc SyncFunc) error {
 	go func(locator [][32]byte) {
 		err := func() error {
 			nextLocator := locator
+			reachedTip := false
+		syncLoop:
 			for {
-				// Initial sync
-				for {
-					headers, err := p.GetHeaders(
-						nextLocator,
+				// Explicitly request headers on initial or catch-up sync
+				if !reachedTip {
+					getHeadersMsg := &MsgGetHeaders{
+						Locator: nextLocator,
 						// Empty hash for no stop
-						[32]byte{},
-					)
-					if err != nil {
+						StopHash: [32]byte{},
+					}
+					if err := p.sendMessage(MessageGetHeaders, getHeadersMsg); err != nil {
 						return err
 					}
-					// Initial sync is done when we get no headers back
-					if len(headers) == 0 {
-						break
+				}
+				// Wait for new header announcements
+				select {
+				case msg := <-p.headersCh:
+					msgHeaders, ok := msg.(*MsgHeaders)
+					if !ok {
+						return fmt.Errorf("unexpected message: %T", msg)
 					}
 					// Fetch block for each header
-					for _, header := range headers {
-						// Stop processing batch of headers if it doesn't fit on last known block
+					for _, header := range msgHeaders.Headers {
+						// Switch back to initial sync mode if we get header that doesn't fit on last known block
 						if nextLocator[0] != header.PrevBlock {
-							break
+							reachedTip = false
+							continue syncLoop
 						}
 						blk, err := p.GetBlock(header.Hash())
 						if err != nil {
@@ -449,38 +458,11 @@ func (p *Peer) Sync(locator [][32]byte, syncFunc SyncFunc) error {
 							header.Hash(),
 						}
 					}
-				}
-			newHeaderAnnounce:
-				// Wait for new header announcements
-				for {
-					select {
-					case msg := <-p.headersCh:
-						msgHeaders, ok := msg.(*MsgHeaders)
-						if !ok {
-							return fmt.Errorf("unexpected message: %T", msg)
-						}
-						// Fetch block for each header
-						for _, header := range msgHeaders.Headers {
-							// Switch back to initial sync mode if we get header that doesn't fit on last known block
-							if nextLocator[0] != header.PrevBlock {
-								break newHeaderAnnounce
-							}
-							blk, err := p.GetBlock(header.Hash())
-							if err != nil {
-								return err
-							}
-							// Call user callback with block
-							if err := syncFunc(blk); err != nil {
-								return err
-							}
-							// Update locator for next iteration
-							nextLocator = [][32]byte{
-								header.Hash(),
-							}
-						}
-					case <-p.doneCh:
-						return errors.New("connection has shut down")
+					if len(msgHeaders.Headers) < maxBlockHeaders {
+						reachedTip = true
 					}
+				case <-p.doneCh:
+					return errors.New("connection has shut down")
 				}
 			}
 		}()
