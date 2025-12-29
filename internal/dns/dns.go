@@ -287,36 +287,6 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 		return
 	}
 
-	// Query fallback servers, if configured
-	if len(cfg.Dns.FallbackServers) > 0 {
-		// Pick random fallback server
-		fallbackServer := randomFallbackServer()
-		// Pass along query to chosen fallback server
-		resp, err := doQuery(r, fallbackServer, false)
-		if err != nil {
-			// Send failure response
-			m.SetRcode(r, dns.RcodeServerFailure)
-			if err := w.WriteMsg(m); err != nil {
-				slog.Error(
-					fmt.Sprintf("failed to write response: %s", err),
-				)
-			}
-			slog.Error(
-				fmt.Sprintf("failed to query domain nameserver: %s", err),
-			)
-			return
-		} else {
-			copyResponse(r, resp, m)
-			// Send response
-			if err := w.WriteMsg(m); err != nil {
-				slog.Error(
-					fmt.Sprintf("failed to write response: %s", err),
-				)
-			}
-			return
-		}
-	}
-
 	// Return NXDOMAIN if we have no information about the requested domain or any of its parents
 	m.SetRcode(r, dns.RcodeNameError)
 	if err := w.WriteMsg(m); err != nil {
@@ -393,9 +363,8 @@ func randomNameserverAddress(nameservers map[string][]net.IP) net.IP {
 }
 
 func doQuery(msg *dns.Msg, address string, recursive bool) (*dns.Msg, error) {
-	// Default to a random fallback server if no address is specified
 	if address == "" {
-		address = randomFallbackServer()
+		return nil, errors.New("no address specified")
 	}
 	// Add default port to address if there is none
 	if _, _, err := net.SplitHostPort(address); err != nil {
@@ -576,18 +545,6 @@ func getNameserversFromResponse(msg *dns.Msg) map[string][]net.IP {
 		}
 	}
 	return ret
-}
-
-func randomFallbackServer() string {
-	cfg := config.GetConfig()
-	n, err := rand.Int(
-		rand.Reader,
-		big.NewInt(int64(len(cfg.Dns.FallbackServers))),
-	)
-	if err != nil {
-		return ""
-	}
-	return cfg.Dns.FallbackServers[n.Int64()]
 }
 
 func formatMessageAnswerSection(section []dns.RR) string {
