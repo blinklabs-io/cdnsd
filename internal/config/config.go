@@ -33,13 +33,12 @@ type LoggingConfig struct {
 }
 
 type DnsConfig struct {
-	ListenAddress    string   `yaml:"address"          envconfig:"DNS_LISTEN_ADDRESS"`
-	ListenPort       uint     `yaml:"port"             envconfig:"DNS_LISTEN_PORT"`
-	ListenTlsPort    uint     `yaml:"tlsPort"          envconfig:"DNS_LISTEN_TLS_PORT"`
-	RecursionEnabled bool     `yaml:"recursionEnabled" envconfig:"DNS_RECURSION"`
-	RootHints        string   `yaml:"rootHints"        envconfig:"DNS_ROOT_HINTS"`
-	RootHintsFile    string   `yaml:"rootHintsFile"    envconfig:"DNS_ROOT_HINTS_FILE"`
-	FallbackServers  []string `yaml:"fallbackServers"  envconfig:"DNS_FALLBACK_SERVERS"`
+	ListenAddress    string `yaml:"address"          envconfig:"DNS_LISTEN_ADDRESS"`
+	ListenPort       uint   `yaml:"port"             envconfig:"DNS_LISTEN_PORT"`
+	ListenTlsPort    uint   `yaml:"tlsPort"          envconfig:"DNS_LISTEN_TLS_PORT"`
+	RecursionEnabled bool   `yaml:"recursionEnabled" envconfig:"DNS_RECURSION"`
+	RootHints        string `yaml:"rootHints"        envconfig:"DNS_ROOT_HINTS"`
+	RootHintsFile    string `yaml:"rootHintsFile"    envconfig:"DNS_ROOT_HINTS_FILE"`
 }
 
 type DebugConfig struct {
@@ -85,12 +84,6 @@ var globalConfig = &Config{
 		ListenPort:    8053,
 		ListenTlsPort: 8853,
 		RootHints:     string(defaultRootHints),
-		// hdns.io
-		FallbackServers: []string{
-			"103.196.38.38",
-			"103.196.38.39",
-			"103.196.38.40",
-		},
 	},
 	Debug: DebugConfig{
 		ListenAddress: "localhost",
