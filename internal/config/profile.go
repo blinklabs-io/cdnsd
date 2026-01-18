@@ -29,7 +29,7 @@ func GetProfiles() []Profile {
 }
 
 func GetAvailableProfiles() []string {
-	ret := []string{}
+	ret := make([]string, 0, len(Profiles))
 	for k := range Profiles {
 		ret = append(ret, k)
 	}
