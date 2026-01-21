@@ -5,7 +5,7 @@ go 1.24.0
 toolchain go1.24.4
 
 require (
-	github.com/blinklabs-io/adder v0.35.0
+	github.com/blinklabs-io/adder v0.36.0
 	github.com/blinklabs-io/cardano-models v0.7.0
 	github.com/blinklabs-io/gouroboros v0.146.0
 	github.com/dgraph-io/badger/v4 v4.9.0
@@ -58,7 +58,7 @@ require (
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.66.1 // indirect
 	github.com/prometheus/procfs v0.16.1 // indirect
-	github.com/spf13/pflag v1.0.6 // indirect
+	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/utxorpc/go-codegen v0.18.1 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
