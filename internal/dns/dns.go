@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"math/big"
 	"net"
 	"os"
@@ -30,7 +31,154 @@ var metricQueryTotal = promauto.NewCounter(prometheus.CounterOpts{
 	Help: "total DNS queries handled",
 })
 
+// resolutionContext tracks state during recursive DNS resolution
+// to prevent infinite loops and limit recursion depth.
+type resolutionContext struct {
+	depth    int
+	maxDepth int
+	visited  map[string]bool
+}
+
+func newResolutionContext() *resolutionContext {
+	return &resolutionContext{
+		depth:    0,
+		maxDepth: 10,
+		visited:  make(map[string]bool),
+	}
+}
+
+func (c *resolutionContext) hasVisited(name string) bool {
+	return c.visited[name]
+}
+
+func (c *resolutionContext) markVisited(name string) {
+	c.visited[name] = true
+}
+
+func (c *resolutionContext) atMaxDepth() bool {
+	return c.depth >= c.maxDepth
+}
+
+func (c *resolutionContext) descend() *resolutionContext {
+	newVisited := make(map[string]bool, len(c.visited))
+	maps.Copy(newVisited, c.visited)
+	return &resolutionContext{
+		depth:    c.depth + 1,
+		maxDepth: c.maxDepth,
+		visited:  newVisited,
+	}
+}
+
+// resolveNameserverAddress attempts to resolve A/AAAA records for a nameserver.
+// It first checks local storage (Cardano/Handshake), then falls back to
+// recursive resolution via upstream nameservers.
+func resolveNameserverAddress(nsName string, ctx *resolutionContext) ([]net.IP, error) {
+	if ctx.atMaxDepth() {
+		return nil, fmt.Errorf("max resolution depth exceeded resolving %s", nsName)
+	}
+
+	if ctx.hasVisited(nsName) {
+		return nil, fmt.Errorf("cycle detected resolving %s", nsName)
+	}
+	ctx.markVisited(nsName)
+
+	var ips []net.IP
+
+	// Try local Cardano records first
+	aRecords, err := state.GetState().LookupRecords(
+		[]string{"A", "AAAA"},
+		nsName,
+	)
+	if err != nil {
+		return nil, err
+	}
+	for _, record := range aRecords {
+		if ip := net.ParseIP(record.Rhs); ip != nil {
+			ips = append(ips, ip)
+		}
+	}
+	if len(ips) > 0 {
+		return ips, nil
+	}
+
+	// Try local Handshake records
+	hsRecords, err := state.GetState().LookupHandshakeRecords(
+		[]string{"A", "AAAA"},
+		nsName,
+	)
+	if err != nil {
+		return nil, err
+	}
+	for _, record := range hsRecords {
+		if ip := net.ParseIP(record.Rhs); ip != nil {
+			ips = append(ips, ip)
+		}
+	}
+	if len(ips) > 0 {
+		return ips, nil
+	}
+
+	// Not found locally - resolve via upstream using root hints
+	childCtx := ctx.descend()
+
+	// Build a DNS query for the nameserver's A record
+	msg := new(dns.Msg)
+	msg.SetQuestion(dns.Fqdn(nsName), dns.TypeA)
+	msg.RecursionDesired = true
+
+	// Start from root hints and resolve iteratively
+	rootNS := getRandomRootServer()
+	if rootNS == "" {
+		return nil, errors.New("no root servers available")
+	}
+
+	resp, err := doQueryWithContext(msg, rootNS, true, childCtx)
+	if err != nil {
+		return nil, fmt.Errorf("upstream resolution failed for %s: %w", nsName, err)
+	}
+
+	// Extract A/AAAA records from response
+	for _, rr := range resp.Answer {
+		switch v := rr.(type) {
+		case *dns.A:
+			ips = append(ips, v.A)
+		case *dns.AAAA:
+			ips = append(ips, v.AAAA)
+		}
+	}
+
+	return ips, nil
+}
+
 var rootHints map[uint16]map[string][]dns.RR
+
+// getRandomRootServer returns a random root server address from hints
+func getRandomRootServer() string {
+	if rootHints == nil {
+		return ""
+	}
+	if rootHints[dns.TypeA] == nil {
+		return ""
+	}
+	// Collect all A records
+	var servers []string
+	for _, rrs := range rootHints[dns.TypeA] {
+		for _, rr := range rrs {
+			if a, ok := rr.(*dns.A); ok {
+				servers = append(servers, net.JoinHostPort(a.A.String(), "53"))
+			}
+		}
+	}
+	if len(servers) == 0 {
+		return ""
+	}
+	// Select one at random
+	n, err := rand.Int(rand.Reader, big.NewInt(int64(len(servers))))
+	if err != nil {
+		return servers[0] // Fallback to first if random fails
+	}
+	return servers[n.Int64()]
+}
 
 func Start() error {
 	cfg := config.GetConfig()
@@ -211,6 +359,8 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 		// Assemble response
 		m.SetReply(r)
 		if cfg.Dns.RecursionEnabled {
+			ctx := newResolutionContext()
+
 			// Pick random nameserver for domain
 			tmpNameserver := randomNameserverAddress(nameservers)
 			if tmpNameserver == nil {
@@ -226,7 +376,7 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 				return
 			}
 			// Query the random domain nameserver we picked above
-			resp, err := doQuery(r, tmpNameserver.String(), true)
+			resp, err := doQueryWithContext(r, net.JoinHostPort(tmpNameserver.String(), "53"), true, ctx)
 			if err != nil {
 				// Send failure response
 				m.SetRcode(r, dns.RcodeServerFailure)
@@ -362,56 +512,73 @@ func randomNameserverAddress(nameservers map[string][]net.IP) net.IP {
 	return nil
 }
 
-func doQuery(msg *dns.Msg, address string, recursive bool) (*dns.Msg, error) {
-	if address == "" {
-		return nil, errors.New("no address specified")
+// doQueryWithContext performs a DNS query with resolution context for depth tracking.
+// It wraps the existing doQuery logic with context awareness.
+func doQueryWithContext(msg *dns.Msg, address string, recursive bool, ctx *resolutionContext) (*dns.Msg, error) {
+	if ctx.atMaxDepth() {
+		return nil, errors.New("max resolution depth exceeded")
 	}
-	// Add default port to address if there is none
+
+	// Add default port if not specified
 	if _, _, err := net.SplitHostPort(address); err != nil {
-		address = net.JoinHostPort(address, `53`)
+		address = net.JoinHostPort(address, "53")
 	}
-	slog.Debug(
-		fmt.Sprintf(
-			"querying %s: %s",
-			address,
-			formatMessageQuestionSection(msg.Question),
-		),
-	)
+
 	resp, err := dns.Exchange(msg, address)
 	if err != nil {
 		return nil, err
 	}
-	if resp == nil {
-		return nil, errors.New("dns response empty")
-	}
-	slog.Debug(
-		fmt.Sprintf(
-			"response: rcode=%s, authoritative=%v, authority=%s, answer=%s, extra=%s",
-			dns.RcodeToString[resp.Rcode],
-			resp.Authoritative,
-			formatMessageAnswerSection(resp.Ns),
-			formatMessageAnswerSection(resp.Answer),
-			formatMessageAnswerSection(resp.Extra),
-		),
-	)
-	// Immediately return authoritative response
-	if resp.Authoritative {
+
+	// If we got an authoritative answer or non-recursive mode, return
+	if resp.Authoritative || !recursive {
 		return resp, nil
 	}
-	if recursive {
-		if len(resp.Ns) > 0 {
-			nameservers := getNameserversFromResponse(resp)
-			randNsAddress := randomNameserverAddress(nameservers)
-			if randNsAddress == nil {
-				return nil, errors.New("could not get nameservers from response")
+
+	// Handle referrals (NS records in authority section)
+	if len(resp.Ns) > 0 {
+		nameservers := getNameserversFromResponse(resp)
+
+		// Try to resolve missing glue records
+		childCtx := ctx.descend()
+		for nsName, nsIPs := range nameservers {
+			if len(nsIPs) == 0 {
+				resolvedIPs, err := resolveNameserverAddress(nsName, childCtx)
+				if err != nil {
+					slog.Debug(
+						fmt.Sprintf("failed to resolve NS address: ns=%s, error=%s", nsName, err),
+					)
+					continue
+				}
+				nameservers[nsName] = resolvedIPs
 			}
-			// Perform recursive query
-			return doQuery(msg, randNsAddress.String(), true)
-		} else {
-			// Return the current response if there is no authority information
-			return resp, nil
+		}
+
+		// Pick a random nameserver that has addresses
+		availableNS := make([]string, 0, len(nameservers))
+		for nsName, nsIPs := range nameservers {
+			if len(nsIPs) > 0 {
+				availableNS = append(availableNS, nsName)
+			}
+		}
+
+		if len(availableNS) > 0 {
+			n, err := rand.Int(rand.Reader, big.NewInt(int64(len(availableNS))))
+			if err != nil {
+				return nil, fmt.Errorf("random selection failed: %w", err)
+			}
+			randNS := availableNS[n.Int64()]
+			randIP := nameservers[randNS][0]
+			if len(nameservers[randNS]) > 1 {
+				ipIdx, err := rand.Int(rand.Reader, big.NewInt(int64(len(nameservers[randNS]))))
+				if err != nil {
+					return nil, fmt.Errorf("random IP selection failed: %w", err)
+				}
+				randIP = nameservers[randNS][ipIdx.Int64()]
+			}
+			return doQueryWithContext(msg, net.JoinHostPort(randIP.String(), "53"), recursive, childCtx)
 		}
 	}
+
 	return resp, nil
 }
 
@@ -440,7 +607,10 @@ func findNameserversForDomain(
 		if len(nsRecords) > 0 {
 			ret := map[string][]net.IP{}
 			for _, nsRecord := range nsRecords {
-				// Get matching A/AAAA records for NS entry
+				nsName := dns.Fqdn(nsRecord.Rhs)
+				var nsIPs []net.IP
+
+				// Get matching A/AAAA records for NS entry from local storage
 				aRecords, err := state.GetState().
 					LookupRecords([]string{"A", "AAAA"}, nsRecord.Rhs)
 				if err != nil {
@@ -449,16 +619,28 @@ func findNameserversForDomain(
 				for _, aRecord := range aRecords {
 					tmpIp := net.ParseIP(aRecord.Rhs)
 					// Skip duplicate IPs
-					if slices.ContainsFunc(ret[nsRecord.Rhs], func(x net.IP) bool {
+					if slices.ContainsFunc(nsIPs, func(x net.IP) bool {
 						return x.Equal(tmpIp)
 					}) {
 						continue
 					}
-					ret[nsRecord.Rhs] = append(
-						ret[nsRecord.Rhs],
-						tmpIp,
-					)
+					nsIPs = append(nsIPs, tmpIp)
 				}
+
+				// If no local records, try to resolve via upstream
+				if len(nsIPs) == 0 {
+					ctx := newResolutionContext()
+					resolvedIPs, resolveErr := resolveNameserverAddress(nsName, ctx)
+					if resolveErr != nil {
+						slog.Debug(
+							fmt.Sprintf("failed to resolve NS glue: ns=%s, error=%s", nsName, resolveErr),
+						)
+					} else {
+						nsIPs = resolvedIPs
+					}
+				}
+
+				ret[nsName] = nsIPs
 			}
 			return dns.Fqdn(lookupDomainName), ret, nil
 		}
@@ -471,7 +653,10 @@ func findNameserversForDomain(
 		if len(nsRecords) > 0 {
 			ret := map[string][]net.IP{}
 			for _, nsRecord := range nsRecords {
-				// Get matching A/AAAA records for NS entry
+				nsName := dns.Fqdn(nsRecord.Rhs)
+				var nsIPs []net.IP
+
+				// Get matching A/AAAA records for NS entry from local storage
 				aRecords, err := state.GetState().
 					LookupHandshakeRecords([]string{"A", "AAAA"}, nsRecord.Rhs)
 				if err != nil {
@@ -480,16 +665,28 @@ func findNameserversForDomain(
 				for _, aRecord := range aRecords {
 					tmpIp := net.ParseIP(aRecord.Rhs)
 					// Skip duplicate IPs
-					if slices.ContainsFunc(ret[nsRecord.Rhs], func(x net.IP) bool {
+					if slices.ContainsFunc(nsIPs, func(x net.IP) bool {
 						return x.Equal(tmpIp)
 					}) {
 						continue
 					}
-					ret[nsRecord.Rhs] = append(
-						ret[nsRecord.Rhs],
-						tmpIp,
-					)
+					nsIPs = append(nsIPs, tmpIp)
 				}
+
+				// If no local records, try to resolve via upstream
+				if len(nsIPs) == 0 {
+					ctx := newResolutionContext()
+					resolvedIPs, resolveErr := resolveNameserverAddress(nsName, ctx)
+					if resolveErr != nil {
+						slog.Debug(
+							fmt.Sprintf("failed to resolve NS glue: ns=%s, error=%s", nsName, resolveErr),
+						)
+					} else {
+						nsIPs = resolvedIPs
+					}
+				}
+
+				ret[nsName] = nsIPs
 			}
 			return dns.Fqdn(lookupDomainName), ret, nil
 		}
@@ -545,56 +742,4 @@ func getNameserversFromResponse(msg *dns.Msg) map[string][]net.IP {
 		}
 	}
 	return ret
-}
-
-func formatMessageAnswerSection(section []dns.RR) string {
-	var sb strings.Builder
-	sb.WriteByte('[')
-	sb.WriteByte(' ')
-	for idx, rr := range section {
-		sb.WriteByte('<')
-		sb.WriteByte(' ')
-		sb.WriteString(strings.ReplaceAll(
-			strings.TrimPrefix(
-				rr.String(),
-				";",
-			),
-			"\t",
-			" ",
-		))
-		sb.WriteByte('>')
-		sb.WriteByte(' ')
-		if idx != len(section)-1 {
-			sb.WriteByte(',')
-		}
-		sb.WriteByte(' ')
-	}
-	sb.WriteByte(']')
-	return sb.String()
-}
-
-func formatMessageQuestionSection(section []dns.Question) string {
-	var sb strings.Builder
-	sb.WriteByte('[')
-	sb.WriteByte(' ')
-	for idx, question := range section {
-		sb.WriteByte('<')
-		sb.WriteByte(' ')
-		sb.WriteString(strings.ReplaceAll(
-			strings.TrimPrefix(
-				question.String(),
-				";",
-			),
-			"\t",
-			" ",
-		))
-		sb.WriteByte('>')
-		sb.WriteByte(' ')
-		if idx != len(section)-1 {
-			sb.WriteByte(',')
-		}
-		sb.WriteByte(' ')
-	}
-	sb.WriteByte(']')
-	return sb.String()
 }
