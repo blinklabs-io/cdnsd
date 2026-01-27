@@ -10,7 +10,7 @@ require (
 	github.com/blinklabs-io/gouroboros v0.146.0
 	github.com/dgraph-io/badger/v4 v4.9.0
 	github.com/kelseyhightower/envconfig v1.4.0
-	github.com/miekg/dns v1.1.70
+	github.com/miekg/dns v1.1.72
 	github.com/prometheus/client_golang v1.23.2
 	go.uber.org/automaxprocs v1.6.0
 	golang.org/x/crypto v0.47.0
