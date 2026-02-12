@@ -50,7 +50,11 @@ type Message interface {
 	Decode([]byte) error
 }
 
-func encodeMessage(msgType uint8, payload []byte, networkMagic uint32) ([]byte, error) {
+func encodeMessage(
+	msgType uint8,
+	payload []byte,
+	networkMagic uint32,
+) ([]byte, error) {
 	if len(payload) > messageMaxPayloadLength {
 		return nil, errors.New("payload is too large")
 	}
@@ -179,7 +183,9 @@ func (m *MsgVersion) Decode(data []byte) error {
 	m.Nonce = [8]byte(data[108:116])
 	userAgentLength := int(data[116])
 	m.Agent = string(data[117 : 117+userAgentLength])
-	m.Height = binary.LittleEndian.Uint32(data[117+userAgentLength : 117+userAgentLength+4])
+	m.Height = binary.LittleEndian.Uint32(
+		data[117+userAgentLength : 117+userAgentLength+4],
+	)
 	noRelayByte := data[117+userAgentLength+4]
 	m.NoRelay = false
 	if noRelayByte == 1 {

@@ -67,19 +67,25 @@ func (c *GenericCovenant) Covenant() Covenant {
 	case CovenantTypeNone:
 		ret, err := NewNoneCovenantFromGeneric(c)
 		if err != nil {
-			panic(fmt.Sprintf("can't convert generic covenant to None: %s", err))
+			panic(
+				fmt.Sprintf("can't convert generic covenant to None: %s", err),
+			)
 		}
 		return ret
 	case CovenantTypeClaim:
 		ret, err := NewClaimCovenantFromGeneric(c)
 		if err != nil {
-			panic(fmt.Sprintf("can't convert generic covenant to Claim: %s", err))
+			panic(
+				fmt.Sprintf("can't convert generic covenant to Claim: %s", err),
+			)
 		}
 		return ret
 	case CovenantTypeOpen:
 		ret, err := NewOpenCovenantFromGeneric(c)
 		if err != nil {
-			panic(fmt.Sprintf("can't convert generic covenant to Open: %s", err))
+			panic(
+				fmt.Sprintf("can't convert generic covenant to Open: %s", err),
+			)
 		}
 		return ret
 	case CovenantTypeBid:
@@ -91,49 +97,86 @@ func (c *GenericCovenant) Covenant() Covenant {
 	case CovenantTypeReveal:
 		ret, err := NewRevealCovenantFromGeneric(c)
 		if err != nil {
-			panic(fmt.Sprintf("can't convert generic covenant to Reveal: %s", err))
+			panic(
+				fmt.Sprintf(
+					"can't convert generic covenant to Reveal: %s",
+					err,
+				),
+			)
 		}
 		return ret
 	case CovenantTypeRedeem:
 		ret, err := NewRedeemCovenantFromGeneric(c)
 		if err != nil {
-			panic(fmt.Sprintf("can't convert generic covenant to Redeem: %s", err))
+			panic(
+				fmt.Sprintf(
+					"can't convert generic covenant to Redeem: %s",
+					err,
+				),
+			)
 		}
 		return ret
 	case CovenantTypeRegister:
 		ret, err := NewRegisterCovenantFromGeneric(c)
 		if err != nil {
-			panic(fmt.Sprintf("can't convert generic covenant to Register: %s", err))
+			panic(
+				fmt.Sprintf(
+					"can't convert generic covenant to Register: %s",
+					err,
+				),
+			)
 		}
 		return ret
 	case CovenantTypeUpdate:
 		ret, err := NewUpdateCovenantFromGeneric(c)
 		if err != nil {
-			panic(fmt.Sprintf("can't convert generic covenant to Update: %s", err))
+			panic(
+				fmt.Sprintf(
+					"can't convert generic covenant to Update: %s",
+					err,
+				),
+			)
 		}
 		return ret
 	case CovenantTypeRenew:
 		ret, err := NewRenewCovenantFromGeneric(c)
 		if err != nil {
-			panic(fmt.Sprintf("can't convert generic covenant to Renew: %s", err))
+			panic(
+				fmt.Sprintf("can't convert generic covenant to Renew: %s", err),
+			)
 		}
 		return ret
 	case CovenantTypeTransfer:
 		ret, err := NewTransferCovenantFromGeneric(c)
 		if err != nil {
-			panic(fmt.Sprintf("can't convert generic covenant to Transfer: %s", err))
+			panic(
+				fmt.Sprintf(
+					"can't convert generic covenant to Transfer: %s",
+					err,
+				),
+			)
 		}
 		return ret
 	case CovenantTypeFinalize:
 		ret, err := NewFinalizeCovenantFromGeneric(c)
 		if err != nil {
-			panic(fmt.Sprintf("can't convert generic covenant to Finalize: %s", err))
+			panic(
+				fmt.Sprintf(
+					"can't convert generic covenant to Finalize: %s",
+					err,
+				),
+			)
 		}
 		return ret
 	case CovenantTypeRevoke:
 		ret, err := NewRevokeCovenantFromGeneric(c)
 		if err != nil {
-			panic(fmt.Sprintf("can't convert generic covenant to Revoke: %s", err))
+			panic(
+				fmt.Sprintf(
+					"can't convert generic covenant to Revoke: %s",
+					err,
+				),
+			)
 		}
 		return ret
 	default:
