@@ -25,6 +25,8 @@ type handshakeState struct {
 	peer             *handshake.Peer
 	peerAddress      string
 	peerBackoffDelay time.Duration
+	lastBlockHash    [32]byte
+	hasLastBlock     bool
 }
 
 func (i *Indexer) startHandshake() error {
@@ -86,6 +88,8 @@ func (i *Indexer) handshakeConnectPeer() error {
 			return errors.New("bad Handshake locator")
 		}
 		locator = [][32]byte{[32]byte(hashBytes)}
+		i.handshakeState.lastBlockHash = [32]byte(hashBytes)
+		i.handshakeState.hasLastBlock = true
 	}
 	// Start sync
 	if err := i.handshakeState.peer.Sync(locator, i.handshakeHandleSync); err != nil {
@@ -133,8 +137,28 @@ func (i *Indexer) handshakeHandleSync(block *handshake.Block) error {
 	slog.Debug(
 		"synced Handshake block",
 		"hash", fmt.Sprintf("%x", block.Hash()),
-		"prevHash", fmt.Sprintf("%x", block.Header.PrevBlock),
+		"prevHash", fmt.Sprintf(
+			"%x",
+			block.Header.PrevBlock,
+		),
 	)
+	// Verify PrevBlock hash continuity
+	if i.handshakeState.hasLastBlock {
+		if block.Header.PrevBlock != i.handshakeState.lastBlockHash {
+			return fmt.Errorf(
+				"block PrevBlock %x does not match last block hash %x",
+				block.Header.PrevBlock,
+				i.handshakeState.lastBlockHash,
+			)
+		}
+	}
+	// Validate proof-of-work
+	if err := block.ValidatePoW(); err != nil {
+		return fmt.Errorf(
+			"block PoW validation failed: %w",
+			err,
+		)
+	}
 	// Process transactions
 	for _, tx := range block.Transactions {
 		// Process outputs
@@ -240,9 +264,14 @@ func (i *Indexer) handshakeHandleSync(block *handshake.Block) error {
 	}
 	// Update cursor
 	blockHash := block.Hash()
-	if err := state.GetState().UpdateHandshakeCursor(hex.EncodeToString(blockHash[:])); err != nil {
+	if err := state.GetState().UpdateHandshakeCursor(
+		hex.EncodeToString(blockHash[:]),
+	); err != nil {
 		return err
 	}
+	// Track last block hash for continuity checks
+	i.handshakeState.lastBlockHash = blockHash
+	i.handshakeState.hasLastBlock = true
 	return nil
 }
 
