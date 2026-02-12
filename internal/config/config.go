@@ -39,6 +39,9 @@ type DnsConfig struct {
 	RecursionEnabled bool      `yaml:"recursionEnabled" envconfig:"DNS_RECURSION"`
 	RootHints        string    `yaml:"rootHints"        envconfig:"DNS_ROOT_HINTS"`
 	RootHintsFile    string    `yaml:"rootHintsFile"    envconfig:"DNS_ROOT_HINTS_FILE"`
+	RetryCount       int       `yaml:"retryCount"       envconfig:"DNS_RETRY_COUNT"`
+	RetryDelayMs     int       `yaml:"retryDelayMs"     envconfig:"DNS_RETRY_DELAY_MS"`
+	QueryTimeoutMs   int       `yaml:"queryTimeoutMs"   envconfig:"DNS_QUERY_TIMEOUT_MS"`
 	SOA              SOAConfig `yaml:"soa"`
 }
 
@@ -90,10 +93,13 @@ var globalConfig = &Config{
 		QueryLog: true,
 	},
 	Dns: DnsConfig{
-		ListenAddress: "",
-		ListenPort:    8053,
-		ListenTlsPort: 8853,
-		RootHints:     string(defaultRootHints),
+		ListenAddress:  "",
+		ListenPort:     8053,
+		ListenTlsPort:  8853,
+		RootHints:      string(defaultRootHints),
+		RetryCount:     3,
+		RetryDelayMs:   100,
+		QueryTimeoutMs: 5000,
 		SOA: SOAConfig{
 			Mname:   "ns1.cdnsd.localhost.",
 			Rname:   "hostmaster.cdnsd.localhost.",
