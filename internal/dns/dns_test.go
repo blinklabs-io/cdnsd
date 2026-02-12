@@ -8,6 +8,7 @@ package dns
 
 import (
 	"fmt"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -442,5 +443,242 @@ func TestSOAConfigDefaults(t *testing.T) {
 	}
 	if soaCfg.Minimum == 0 {
 		t.Error("expected non-zero SOA minimum default")
+	}
+}
+
+func TestQueryWithRetry(t *testing.T) {
+	attempts := 0
+	mockQuery := func() (*dns.Msg, error) {
+		attempts++
+		if attempts < 3 {
+			return nil, fmt.Errorf(
+				"simulated failure %d",
+				attempts,
+			)
+		}
+		return &dns.Msg{}, nil
+	}
+
+	result, err := queryWithRetry(
+		mockQuery,
+		3,
+		10*time.Millisecond,
+	)
+	if err != nil {
+		t.Errorf(
+			"expected success after retries, got: %v",
+			err,
+		)
+	}
+	if result == nil {
+		t.Error("expected non-nil result")
+	}
+	if attempts != 3 {
+		t.Errorf("expected 3 attempts, got %d", attempts)
+	}
+}
+
+func TestQueryWithRetryExhausted(t *testing.T) {
+	attempts := 0
+	mockQuery := func() (*dns.Msg, error) {
+		attempts++
+		return nil, fmt.Errorf("always fails")
+	}
+
+	result, err := queryWithRetry(
+		mockQuery,
+		3,
+		10*time.Millisecond,
+	)
+	if err == nil {
+		t.Error("expected error when retries exhausted")
+	}
+	if result != nil {
+		t.Error("expected nil result on failure")
+	}
+	if attempts != 3 {
+		t.Errorf("expected 3 attempts, got %d", attempts)
+	}
+}
+
+func TestQueryWithRetryFirstAttemptSuccess(t *testing.T) {
+	attempts := 0
+	mockQuery := func() (*dns.Msg, error) {
+		attempts++
+		return &dns.Msg{}, nil
+	}
+
+	result, err := queryWithRetry(
+		mockQuery,
+		3,
+		10*time.Millisecond,
+	)
+	if err != nil {
+		t.Errorf("expected success, got: %v", err)
+	}
+	if result == nil {
+		t.Error("expected non-nil result")
+	}
+	if attempts != 1 {
+		t.Errorf("expected 1 attempt, got %d", attempts)
+	}
+}
+
+func TestQueryMultipleNameservers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	ctx := newResolutionContext()
+	msg := new(dns.Msg)
+	msg.SetQuestion("example.com.", dns.TypeA)
+
+	// Use multiple public resolvers
+	nameservers := map[string][]net.IP{
+		"resolver1.": {net.ParseIP("8.8.8.8")},
+		"resolver2.": {net.ParseIP("1.1.1.1")},
+	}
+
+	resp, err := queryMultipleNameservers(
+		msg,
+		nameservers,
+		false,
+		ctx,
+	)
+	if err != nil {
+		t.Skipf("network unavailable: %v", err)
+	}
+	if resp == nil {
+		t.Error("expected response")
+	}
+}
+
+func TestQueryMultipleNameserversFailover(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	ctx := newResolutionContext()
+	msg := new(dns.Msg)
+	msg.SetQuestion("example.com.", dns.TypeA)
+
+	// First nameserver is invalid, second should work
+	nameservers := map[string][]net.IP{
+		"bad.":  {net.ParseIP("192.0.2.1")},
+		"good.": {net.ParseIP("8.8.8.8")},
+	}
+
+	// Use short timeout so bad server fails fast
+	cfg := config.GetConfig()
+	origTimeout := cfg.Dns.QueryTimeoutMs
+	origRetry := cfg.Dns.RetryCount
+	cfg.Dns.QueryTimeoutMs = 500
+	cfg.Dns.RetryCount = 1
+	defer func() {
+		cfg.Dns.QueryTimeoutMs = origTimeout
+		cfg.Dns.RetryCount = origRetry
+	}()
+
+	resp, err := queryMultipleNameservers(
+		msg,
+		nameservers,
+		false,
+		ctx,
+	)
+	if err != nil {
+		t.Skipf("network unavailable: %v", err)
+	}
+	if resp == nil {
+		t.Error("expected response from fallback nameserver")
+	}
+}
+
+func TestQueryMultipleNameserversNoAddresses(t *testing.T) {
+	ctx := newResolutionContext()
+	msg := new(dns.Msg)
+	msg.SetQuestion("example.com.", dns.TypeA)
+
+	nameservers := map[string][]net.IP{}
+
+	_, err := queryMultipleNameservers(
+		msg,
+		nameservers,
+		false,
+		ctx,
+	)
+	if err == nil {
+		t.Error("expected error with no nameservers")
+	}
+}
+
+func TestQueryTimeoutRespected(t *testing.T) {
+	cfg := config.GetConfig()
+	origTimeout := cfg.Dns.QueryTimeoutMs
+	origRetry := cfg.Dns.RetryCount
+	origDelay := cfg.Dns.RetryDelayMs
+	cfg.Dns.QueryTimeoutMs = 100
+	cfg.Dns.RetryCount = 1
+	cfg.Dns.RetryDelayMs = 10
+	defer func() {
+		cfg.Dns.QueryTimeoutMs = origTimeout
+		cfg.Dns.RetryCount = origRetry
+		cfg.Dns.RetryDelayMs = origDelay
+	}()
+
+	ctx := newResolutionContext()
+	msg := new(dns.Msg)
+	msg.SetQuestion("example.com.", dns.TypeA)
+
+	start := time.Now()
+	_, err := doQueryWithContext(
+		msg,
+		"192.0.2.1:53",
+		false,
+		ctx,
+	)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Skip(
+			"unexpectedly got response from TEST-NET address",
+		)
+	}
+
+	// Should timeout within reasonable time
+	maxExpected := 2 * time.Second
+	if elapsed > maxExpected {
+		t.Errorf(
+			"query took too long: %v (expected < %v)",
+			elapsed,
+			maxExpected,
+		)
+	}
+}
+
+func TestShuffleStrings(t *testing.T) {
+	// Verify shuffle doesn't lose elements
+	input := []string{"a", "b", "c", "d", "e"}
+	original := make([]string, len(input))
+	copy(original, input)
+
+	shuffleStrings(input)
+
+	if len(input) != len(original) {
+		t.Errorf(
+			"shuffle changed length: got %d, want %d",
+			len(input),
+			len(original),
+		)
+	}
+
+	// Verify all elements still present
+	seen := make(map[string]bool, len(input))
+	for _, s := range input {
+		seen[s] = true
+	}
+	for _, s := range original {
+		if !seen[s] {
+			t.Errorf("element %q lost after shuffle", s)
+		}
 	}
 }

@@ -81,7 +81,8 @@ func TestMsgVersionEncodeDecode(t *testing.T) {
 						0x0,
 						0x0,
 						0x0,
-					}},
+					},
+				},
 				Nonce: [8]uint8{
 					0x2d,
 					0xe9,
