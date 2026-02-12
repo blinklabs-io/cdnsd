@@ -44,7 +44,9 @@ var blockTestDefs = []struct {
 					),
 				),
 				ExtraNonce: [24]byte(
-					decodeHex("c907ca66957417a200000000000000000000000000000000"),
+					decodeHex(
+						"c907ca66957417a200000000000000000000000000000000",
+					),
 				),
 				WitnessRoot: [32]byte(
 					decodeHex(
@@ -244,7 +246,11 @@ func TestHandshakeBlockHash(t *testing.T) {
 		blockHash := block.Hash()
 		blockHashHex := hex.EncodeToString(blockHash[:])
 		if blockHashHex != testDef.expectedHash {
-			t.Fatalf("did not get expected block hash, got %s, wanted %s", blockHashHex, testDef.expectedHash)
+			t.Fatalf(
+				"did not get expected block hash, got %s, wanted %s",
+				blockHashHex,
+				testDef.expectedHash,
+			)
 		}
 	}
 }

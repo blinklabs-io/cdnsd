@@ -72,9 +72,15 @@ func (c *resolutionContext) descend() *resolutionContext {
 // resolveNameserverAddress attempts to resolve A/AAAA records for a nameserver.
 // It first checks local storage (Cardano/Handshake), then falls back to
 // recursive resolution via upstream nameservers.
-func resolveNameserverAddress(nsName string, ctx *resolutionContext) ([]net.IP, error) {
+func resolveNameserverAddress(
+	nsName string,
+	ctx *resolutionContext,
+) ([]net.IP, error) {
 	if ctx.atMaxDepth() {
-		return nil, fmt.Errorf("max resolution depth exceeded resolving %s", nsName)
+		return nil, fmt.Errorf(
+			"max resolution depth exceeded resolving %s",
+			nsName,
+		)
 	}
 
 	if ctx.hasVisited(nsName) {
@@ -134,7 +140,11 @@ func resolveNameserverAddress(nsName string, ctx *resolutionContext) ([]net.IP, 
 
 	resp, err := doQueryWithContext(msg, rootNS, true, childCtx)
 	if err != nil {
-		return nil, fmt.Errorf("upstream resolution failed for %s: %w", nsName, err)
+		return nil, fmt.Errorf(
+			"upstream resolution failed for %s: %w",
+			nsName,
+			err,
+		)
 	}
 
 	// Extract A/AAAA records from response
@@ -145,6 +155,13 @@ func resolveNameserverAddress(nsName string, ctx *resolutionContext) ([]net.IP, 
 		case *dns.AAAA:
 			ips = append(ips, v.AAAA)
 		}
+	}
+
+	if len(ips) == 0 {
+		return nil, fmt.Errorf(
+			"no A/AAAA records in upstream response for %s",
+			nsName,
+		)
 	}
 
 	return ips, nil
@@ -376,7 +393,12 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 				return
 			}
 			// Query the random domain nameserver we picked above
-			resp, err := doQueryWithContext(r, net.JoinHostPort(tmpNameserver.String(), "53"), true, ctx)
+			resp, err := doQueryWithContext(
+				r,
+				net.JoinHostPort(tmpNameserver.String(), "53"),
+				true,
+				ctx,
+			)
 			if err != nil {
 				// Send failure response
 				m.SetRcode(r, dns.RcodeServerFailure)
@@ -514,7 +536,12 @@ func randomNameserverAddress(nameservers map[string][]net.IP) net.IP {
 
 // doQueryWithContext performs a DNS query with resolution context for depth tracking.
 // It wraps the existing doQuery logic with context awareness.
-func doQueryWithContext(msg *dns.Msg, address string, recursive bool, ctx *resolutionContext) (*dns.Msg, error) {
+func doQueryWithContext(
+	msg *dns.Msg,
+	address string,
+	recursive bool,
+	ctx *resolutionContext,
+) (*dns.Msg, error) {
 	if ctx.atMaxDepth() {
 		return nil, errors.New("max resolution depth exceeded")
 	}
@@ -545,7 +572,11 @@ func doQueryWithContext(msg *dns.Msg, address string, recursive bool, ctx *resol
 				resolvedIPs, err := resolveNameserverAddress(nsName, childCtx)
 				if err != nil {
 					slog.Debug(
-						fmt.Sprintf("failed to resolve NS address: ns=%s, error=%s", nsName, err),
+						fmt.Sprintf(
+							"failed to resolve NS address: ns=%s, error=%s",
+							nsName,
+							err,
+						),
 					)
 					continue
 				}
@@ -569,13 +600,24 @@ func doQueryWithContext(msg *dns.Msg, address string, recursive bool, ctx *resol
 			randNS := availableNS[n.Int64()]
 			randIP := nameservers[randNS][0]
 			if len(nameservers[randNS]) > 1 {
-				ipIdx, err := rand.Int(rand.Reader, big.NewInt(int64(len(nameservers[randNS]))))
+				ipIdx, err := rand.Int(
+					rand.Reader,
+					big.NewInt(int64(len(nameservers[randNS]))),
+				)
 				if err != nil {
-					return nil, fmt.Errorf("random IP selection failed: %w", err)
+					return nil, fmt.Errorf(
+						"random IP selection failed: %w",
+						err,
+					)
 				}
 				randIP = nameservers[randNS][ipIdx.Int64()]
 			}
-			return doQueryWithContext(msg, net.JoinHostPort(randIP.String(), "53"), recursive, childCtx)
+			return doQueryWithContext(
+				msg,
+				net.JoinHostPort(randIP.String(), "53"),
+				recursive,
+				childCtx,
+			)
 		}
 	}
 
@@ -630,10 +672,17 @@ func findNameserversForDomain(
 				// If no local records, try to resolve via upstream
 				if len(nsIPs) == 0 {
 					ctx := newResolutionContext()
-					resolvedIPs, resolveErr := resolveNameserverAddress(nsName, ctx)
+					resolvedIPs, resolveErr := resolveNameserverAddress(
+						nsName,
+						ctx,
+					)
 					if resolveErr != nil {
 						slog.Debug(
-							fmt.Sprintf("failed to resolve NS glue: ns=%s, error=%s", nsName, resolveErr),
+							fmt.Sprintf(
+								"failed to resolve NS glue: ns=%s, error=%s",
+								nsName,
+								resolveErr,
+							),
 						)
 					} else {
 						nsIPs = resolvedIPs
@@ -676,10 +725,17 @@ func findNameserversForDomain(
 				// If no local records, try to resolve via upstream
 				if len(nsIPs) == 0 {
 					ctx := newResolutionContext()
-					resolvedIPs, resolveErr := resolveNameserverAddress(nsName, ctx)
+					resolvedIPs, resolveErr := resolveNameserverAddress(
+						nsName,
+						ctx,
+					)
 					if resolveErr != nil {
 						slog.Debug(
-							fmt.Sprintf("failed to resolve NS glue: ns=%s, error=%s", nsName, resolveErr),
+							fmt.Sprintf(
+								"failed to resolve NS glue: ns=%s, error=%s",
+								nsName,
+								resolveErr,
+							),
 						)
 					} else {
 						nsIPs = resolvedIPs

@@ -271,7 +271,12 @@ func (s *State) updateDomain(
 			)
 		}
 		// Delete old records in tracking key that are no longer present after this update
-		domainRecordsKey := fmt.Appendf(nil, "%s%s_records", domainKeyPrefix, domainName)
+		domainRecordsKey := fmt.Appendf(
+			nil,
+			"%s%s_records",
+			domainKeyPrefix,
+			domainName,
+		)
 		domainRecordsItem, err := txn.Get(domainRecordsKey)
 		if err != nil {
 			if !errors.Is(err, badger.ErrKeyNotFound) {

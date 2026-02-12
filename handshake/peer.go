@@ -170,7 +170,10 @@ func (p *Peer) recvLoop() {
 				return fmt.Errorf("header decode: %w", err)
 			}
 			if header.NetworkMagic != p.network.Magic {
-				return fmt.Errorf("invalid network magic: %d", header.NetworkMagic)
+				return fmt.Errorf(
+					"invalid network magic: %d",
+					header.NetworkMagic,
+				)
 			}
 			if header.PayloadLength > messageMaxPayloadLength {
 				return errors.New("payload is too large")
@@ -315,7 +318,10 @@ func (p *Peer) GetPeers() ([]NetAddress, error) {
 }
 
 // GetHeaders requests a list of headers from the network peer
-func (p *Peer) GetHeaders(locator [][32]byte, stopHash [32]byte) ([]*BlockHeader, error) {
+func (p *Peer) GetHeaders(
+	locator [][32]byte,
+	stopHash [32]byte,
+) ([]*BlockHeader, error) {
 	getHeadersMsg := &MsgGetHeaders{
 		Locator:  locator,
 		StopHash: stopHash,

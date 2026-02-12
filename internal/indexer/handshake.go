@@ -39,7 +39,11 @@ func (i *Indexer) startHandshake() error {
 }
 
 func (i *Indexer) handshakeConnectPeer() error {
-	slog.Info("connecting to Handshake peer", "address", i.handshakeState.peerAddress)
+	slog.Info(
+		"connecting to Handshake peer",
+		"address",
+		i.handshakeState.peerAddress,
+	)
 	p, err := handshake.NewPeer(nil, handshake.NetworkMainnet)
 	if err != nil {
 		return err
@@ -182,7 +186,10 @@ func (i *Indexer) handshakeHandleSync(block *handshake.Block) error {
 	return nil
 }
 
-func handshakeResourceDataToDomainRecords(domainName string, resData handshake.DomainResourceData) ([]state.DomainRecord, error) {
+func handshakeResourceDataToDomainRecords(
+	domainName string,
+	resData handshake.DomainResourceData,
+) ([]state.DomainRecord, error) {
 	// The return may be larger than this, but it will be at least as large
 	ret := make([]state.DomainRecord, 0, len(resData.Records))
 	for _, record := range resData.Records {
