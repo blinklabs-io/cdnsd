@@ -7,7 +7,10 @@
 package dns
 
 import (
+	"fmt"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/blinklabs-io/cdnsd/internal/config"
 	"github.com/blinklabs-io/cdnsd/internal/state"
@@ -242,5 +245,202 @@ func TestThirdPartyDNSDelegation(t *testing.T) {
 				t.Log("warning: no answer records returned")
 			}
 		})
+	}
+}
+
+func TestGenerateSyntheticSOA(t *testing.T) {
+	soa := generateSyntheticSOA("ada.")
+	if soa == nil {
+		t.Fatal("expected non-nil SOA record")
+	}
+	if soa.Hdr.Name != "ada." {
+		t.Errorf(
+			"expected zone name ada., got %s",
+			soa.Hdr.Name,
+		)
+	}
+	if soa.Hdr.Rrtype != dns.TypeSOA {
+		t.Errorf(
+			"expected SOA rrtype, got %d",
+			soa.Hdr.Rrtype,
+		)
+	}
+	if soa.Hdr.Class != dns.ClassINET {
+		t.Errorf(
+			"expected INET class, got %d",
+			soa.Hdr.Class,
+		)
+	}
+	// Verify config defaults are used
+	cfg := config.GetConfig()
+	soaCfg := cfg.Dns.SOA
+	if soa.Ns != soaCfg.Mname {
+		t.Errorf(
+			"expected mname %s, got %s",
+			soaCfg.Mname,
+			soa.Ns,
+		)
+	}
+	if soa.Mbox != soaCfg.Rname {
+		t.Errorf(
+			"expected rname %s, got %s",
+			soaCfg.Rname,
+			soa.Mbox,
+		)
+	}
+	if soa.Refresh != soaCfg.Refresh {
+		t.Errorf(
+			"expected refresh %d, got %d",
+			soaCfg.Refresh,
+			soa.Refresh,
+		)
+	}
+	if soa.Retry != soaCfg.Retry {
+		t.Errorf(
+			"expected retry %d, got %d",
+			soaCfg.Retry,
+			soa.Retry,
+		)
+	}
+	if soa.Expire != soaCfg.Expire {
+		t.Errorf(
+			"expected expire %d, got %d",
+			soaCfg.Expire,
+			soa.Expire,
+		)
+	}
+	if soa.Minttl != soaCfg.Minimum {
+		t.Errorf(
+			"expected minimum %d, got %d",
+			soaCfg.Minimum,
+			soa.Minttl,
+		)
+	}
+	// Verify serial is date-based (YYYYMMDD00)
+	if soa.Serial == 0 {
+		t.Error("expected non-zero serial")
+	}
+	// Capture time before and after to handle midnight
+	// rollover
+	now := time.Now().UTC()
+	serialFull := fmt.Sprintf("%d", soa.Serial)
+	todayPrefix := now.Format("20060102")
+	yesterdayPrefix := now.AddDate(0, 0, -1).
+		Format("20060102")
+	if !strings.HasPrefix(serialFull, todayPrefix) &&
+		!strings.HasPrefix(serialFull, yesterdayPrefix) {
+		t.Errorf(
+			"expected serial to start with %s or %s, got %s",
+			todayPrefix,
+			yesterdayPrefix,
+			serialFull,
+		)
+	}
+	if !strings.HasSuffix(serialFull, "00") {
+		t.Errorf(
+			"expected serial to end with 00, got %s",
+			serialFull,
+		)
+	}
+}
+
+func TestGenerateSyntheticSOAFqdnHandling(t *testing.T) {
+	// Test with non-FQDN input
+	soa := generateSyntheticSOA("ada")
+	if soa.Hdr.Name != "ada." {
+		t.Errorf(
+			"expected FQDN ada., got %s",
+			soa.Hdr.Name,
+		)
+	}
+	// Test with already-FQDN input
+	soa = generateSyntheticSOA("cardano.")
+	if soa.Hdr.Name != "cardano." {
+		t.Errorf(
+			"expected FQDN cardano., got %s",
+			soa.Hdr.Name,
+		)
+	}
+}
+
+func TestFindZoneForNameFromProfiles(t *testing.T) {
+	// Profiles should work even without state loaded.
+	// ada is a configured profile TLD.
+	zone := findZoneForName("test.ada.")
+	if zone != "ada." {
+		t.Errorf(
+			"expected ada. zone, got %q",
+			zone,
+		)
+	}
+}
+
+func TestFindZoneForNameEmpty(t *testing.T) {
+	// Root domain should return empty
+	zone := findZoneForName(".")
+	if zone != "" {
+		t.Errorf(
+			"expected empty zone for root, got %q",
+			zone,
+		)
+	}
+}
+
+func TestIsBlockchainTLDFromProfiles(t *testing.T) {
+	if !stateIsLoaded() {
+		// Without state, isBlockchainTLD panics on
+		// state.GetState().GetDiscoveredAddresses()
+		// so skip this test
+		t.Skip("state database not loaded")
+	}
+
+	testCases := []struct {
+		name     string
+		tld      string
+		expected bool
+	}{
+		{"ada profile", "ada", true},
+		{"cardano profile", "cardano", true},
+		{"hydra profile", "hydra", true},
+		{"unknown tld", "unknown", false},
+		{"with trailing dot", "ada.", true},
+		{"case insensitive", "ADA", true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := isBlockchainTLD(tc.tld)
+			if result != tc.expected {
+				t.Errorf(
+					"isBlockchainTLD(%q) = %v, want %v",
+					tc.tld,
+					result,
+					tc.expected,
+				)
+			}
+		})
+	}
+}
+
+func TestSOAConfigDefaults(t *testing.T) {
+	cfg := config.GetConfig()
+	soaCfg := cfg.Dns.SOA
+	if soaCfg.Mname == "" {
+		t.Error("expected non-empty SOA mname default")
+	}
+	if soaCfg.Rname == "" {
+		t.Error("expected non-empty SOA rname default")
+	}
+	if soaCfg.Refresh == 0 {
+		t.Error("expected non-zero SOA refresh default")
+	}
+	if soaCfg.Retry == 0 {
+		t.Error("expected non-zero SOA retry default")
+	}
+	if soaCfg.Expire == 0 {
+		t.Error("expected non-zero SOA expire default")
+	}
+	if soaCfg.Minimum == 0 {
+		t.Error("expected non-zero SOA minimum default")
 	}
 }

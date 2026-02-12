@@ -33,12 +33,13 @@ type LoggingConfig struct {
 }
 
 type DnsConfig struct {
-	ListenAddress    string `yaml:"address"          envconfig:"DNS_LISTEN_ADDRESS"`
-	ListenPort       uint   `yaml:"port"             envconfig:"DNS_LISTEN_PORT"`
-	ListenTlsPort    uint   `yaml:"tlsPort"          envconfig:"DNS_LISTEN_TLS_PORT"`
-	RecursionEnabled bool   `yaml:"recursionEnabled" envconfig:"DNS_RECURSION"`
-	RootHints        string `yaml:"rootHints"        envconfig:"DNS_ROOT_HINTS"`
-	RootHintsFile    string `yaml:"rootHintsFile"    envconfig:"DNS_ROOT_HINTS_FILE"`
+	ListenAddress    string    `yaml:"address"          envconfig:"DNS_LISTEN_ADDRESS"`
+	ListenPort       uint      `yaml:"port"             envconfig:"DNS_LISTEN_PORT"`
+	ListenTlsPort    uint      `yaml:"tlsPort"          envconfig:"DNS_LISTEN_TLS_PORT"`
+	RecursionEnabled bool      `yaml:"recursionEnabled" envconfig:"DNS_RECURSION"`
+	RootHints        string    `yaml:"rootHints"        envconfig:"DNS_ROOT_HINTS"`
+	RootHintsFile    string    `yaml:"rootHintsFile"    envconfig:"DNS_ROOT_HINTS_FILE"`
+	SOA              SOAConfig `yaml:"soa"`
 }
 
 type DebugConfig struct {
@@ -66,6 +67,15 @@ type StateConfig struct {
 	Directory string `yaml:"dir" envconfig:"STATE_DIR"`
 }
 
+type SOAConfig struct {
+	Mname   string `yaml:"mname"   envconfig:"DNS_SOA_MNAME"`
+	Rname   string `yaml:"rname"   envconfig:"DNS_SOA_RNAME"`
+	Refresh uint32 `yaml:"refresh" envconfig:"DNS_SOA_REFRESH"`
+	Retry   uint32 `yaml:"retry"   envconfig:"DNS_SOA_RETRY"`
+	Expire  uint32 `yaml:"expire"  envconfig:"DNS_SOA_EXPIRE"`
+	Minimum uint32 `yaml:"minimum" envconfig:"DNS_SOA_MINIMUM"`
+}
+
 type TlsConfig struct {
 	CertFilePath string `yaml:"certFilePath" envconfig:"TLS_CERT_FILE_PATH"`
 	KeyFilePath  string `yaml:"keyFilePath"  envconfig:"TLS_KEY_FILE_PATH"`
@@ -84,6 +94,14 @@ var globalConfig = &Config{
 		ListenPort:    8053,
 		ListenTlsPort: 8853,
 		RootHints:     string(defaultRootHints),
+		SOA: SOAConfig{
+			Mname:   "ns1.cdnsd.localhost.",
+			Rname:   "hostmaster.cdnsd.localhost.",
+			Refresh: 3600,
+			Retry:   900,
+			Expire:  604800,
+			Minimum: 86400,
+		},
 	},
 	Debug: DebugConfig{
 		ListenAddress: "localhost",
