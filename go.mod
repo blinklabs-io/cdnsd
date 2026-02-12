@@ -8,7 +8,7 @@ require (
 	github.com/blinklabs-io/adder v0.37.0
 	github.com/blinklabs-io/cardano-models v0.7.0
 	github.com/blinklabs-io/gouroboros v0.153.1
-	github.com/dgraph-io/badger/v4 v4.9.0
+	github.com/dgraph-io/badger/v4 v4.9.1
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/miekg/dns v1.1.72
 	github.com/prometheus/client_golang v1.23.2
