@@ -175,6 +175,66 @@ func (i *Indexer) handshakeHandleSync(block *handshake.Block) error {
 				if err := state.GetState().UpdateHandshakeDomain(name, records); err != nil {
 					return err
 				}
+			case *handshake.RenewCovenant:
+				name, err := state.GetState().GetHandshakeNameByHash(
+					c.NameHash,
+				)
+				if err != nil {
+					return err
+				}
+				slog.Debug(
+					"Handshake domain renewal",
+					"name", name,
+				)
+			case *handshake.TransferCovenant:
+				name, err := state.GetState().GetHandshakeNameByHash(
+					c.NameHash,
+				)
+				if err != nil {
+					return err
+				}
+				slog.Debug(
+					"Handshake domain transfer initiated",
+					"name", name,
+				)
+			case *handshake.FinalizeCovenant:
+				if err := state.GetState().AddHandshakeName(
+					c.RawName,
+				); err != nil {
+					return err
+				}
+				name, err := state.GetState().GetHandshakeNameByHash(
+					c.NameHash,
+				)
+				if err != nil {
+					return err
+				}
+				slog.Debug(
+					"Handshake domain transfer finalized",
+					"name", name,
+				)
+			case *handshake.RevokeCovenant:
+				name, err := state.GetState().GetHandshakeNameByHash(
+					c.NameHash,
+				)
+				if err != nil {
+					return err
+				}
+				slog.Info(
+					"Handshake domain revoked, clearing records",
+					"name", name,
+				)
+				if err := state.GetState().UpdateHandshakeDomain(
+					name,
+					[]state.DomainRecord{},
+				); err != nil {
+					return err
+				}
+			case *handshake.NoneCovenant,
+				*handshake.BidCovenant,
+				*handshake.RevealCovenant,
+				*handshake.RedeemCovenant:
+				// Auction mechanics - no DNS state changes needed
 			}
 		}
 	}
