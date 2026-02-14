@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/blinklabs-io/cdnsd/internal/config"
 	"github.com/blinklabs-io/cdnsd/internal/state"
@@ -197,6 +198,128 @@ func getRandomRootServer() string {
 	return servers[n.Int64()]
 }
 
+// generateSyntheticSOA creates a SOA record for a blockchain
+// zone using configured values and a date-based serial.
+func generateSyntheticSOA(zone string) *dns.SOA {
+	cfg := config.GetConfig()
+	soaCfg := cfg.Dns.SOA
+	// Generate serial as YYYYMMDD00
+	serial, err := strconv.ParseUint(
+		time.Now().UTC().Format("20060102")+"00",
+		10,
+		32,
+	)
+	if err != nil {
+		// Fallback to a reasonable default
+		serial = 2026010100
+	}
+	return &dns.SOA{
+		Hdr: dns.RR_Header{
+			Name:   dns.Fqdn(zone),
+			Rrtype: dns.TypeSOA,
+			Class:  dns.ClassINET,
+			Ttl:    soaCfg.Minimum,
+		},
+		Ns:      soaCfg.Mname,
+		Mbox:    soaCfg.Rname,
+		Serial:  uint32(serial),
+		Refresh: soaCfg.Refresh,
+		Retry:   soaCfg.Retry,
+		Expire:  soaCfg.Expire,
+		Minttl:  soaCfg.Minimum,
+	}
+}
+
+// isBlockchainTLD checks whether the given name (without trailing
+// dot) is a known blockchain TLD from discovered addresses or
+// configured profiles.
+func isBlockchainTLD(name string) bool {
+	name = strings.TrimSuffix(name, ".")
+	name = strings.ToLower(name)
+
+	// Check configured profiles first (no state needed)
+	for _, profile := range config.GetProfiles() {
+		if strings.EqualFold(profile.Tld, name) {
+			return true
+		}
+	}
+
+	// Check discovered TLDs and Handshake records from state
+	if !stateAvailable() {
+		return false
+	}
+
+	discovered, err := state.GetState().
+		GetDiscoveredAddresses()
+	if err != nil {
+		slog.Debug(
+			fmt.Sprintf(
+				"failed to get discovered addresses: %s",
+				err,
+			),
+		)
+	}
+	for _, addr := range discovered {
+		if strings.EqualFold(addr.TldName, name) {
+			return true
+		}
+	}
+
+	// Check Handshake TLDs by looking up any record for
+	// the name
+	hsRecords, err := state.GetState().
+		LookupHandshakeRecords(
+			[]string{
+				"NS", "A", "AAAA",
+				"CNAME", "TXT", "SOA",
+			},
+			name,
+		)
+	if err != nil {
+		slog.Debug(
+			fmt.Sprintf(
+				"failed to lookup handshake records: %s",
+				err,
+			),
+		)
+	}
+	return len(hsRecords) > 0
+}
+
+// stateAvailable checks if the state database is accessible
+// without panicking.
+func stateAvailable() bool {
+	available := true
+	func() {
+		defer func() {
+			if recover() != nil {
+				available = false
+			}
+		}()
+		_, _ = state.GetState().
+			LookupRecords([]string{"A"}, "__probe__")
+	}()
+	return available
+}
+
+// findZoneForName walks the labels of a DNS name to find the
+// blockchain TLD zone it belongs to. Returns empty string if no
+// blockchain zone is found.
+func findZoneForName(name string) string {
+	labels := dns.SplitDomainName(name)
+	if labels == nil {
+		return ""
+	}
+	// Walk from TLD towards the full name for efficiency
+	for i := len(labels) - 1; i >= 0; i-- {
+		candidate := strings.Join(labels[i:], ".")
+		if isBlockchainTLD(candidate) {
+			return dns.Fqdn(candidate)
+		}
+	}
+	return ""
+}
+
 func Start() error {
 	cfg := config.GetConfig()
 	listenAddr := fmt.Sprintf(
@@ -359,6 +482,29 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 		}
 	}
 
+	// Handle SOA queries for blockchain TLDs when no explicit
+	// on-chain SOA was found
+	if r.Question[0].Qtype == dns.TypeSOA {
+		zone := findZoneForName(r.Question[0].Name)
+		if zone != "" {
+			m.SetReply(r)
+			m.Authoritative = true
+			m.Answer = append(
+				m.Answer,
+				generateSyntheticSOA(zone),
+			)
+			if err := w.WriteMsg(m); err != nil {
+				slog.Error(
+					fmt.Sprintf(
+						"failed to write response: %s",
+						err,
+					),
+				)
+			}
+			return
+		}
+	}
+
 	// Check for any NS records for parent domains from local storage
 	nameserverDomain, nameservers, err := findNameserversForDomain(
 		r.Question[0].Name,
@@ -459,8 +605,14 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 		return
 	}
 
-	// Return NXDOMAIN if we have no information about the requested domain or any of its parents
+	// Return NXDOMAIN if we have no information about the
+	// requested domain or any of its parents
 	m.SetRcode(r, dns.RcodeNameError)
+	// Include SOA in authority section for blockchain zones
+	zone := findZoneForName(r.Question[0].Name)
+	if zone != "" {
+		m.Ns = append(m.Ns, generateSyntheticSOA(zone))
+	}
 	if err := w.WriteMsg(m); err != nil {
 		slog.Error(
 			fmt.Sprintf("failed to write response: %s", err),
