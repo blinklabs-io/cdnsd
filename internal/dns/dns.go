@@ -524,24 +524,10 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 		if cfg.Dns.RecursionEnabled {
 			ctx := newResolutionContext()
 
-			// Pick random nameserver for domain
-			tmpNameserver := randomNameserverAddress(nameservers)
-			if tmpNameserver == nil {
-				m.SetRcode(r, dns.RcodeServerFailure)
-				if err := w.WriteMsg(m); err != nil {
-					slog.Error(
-						"unable to get nameserver",
-					)
-				}
-				slog.Error(
-					"unable to get nameserver",
-				)
-				return
-			}
-			// Query the random domain nameserver we picked above
-			resp, err := doQueryWithContext(
+			// Try all nameservers with retry and failover
+			resp, err := queryMultipleNameservers(
 				r,
-				net.JoinHostPort(tmpNameserver.String(), "53"),
+				nameservers,
 				true,
 				ctx,
 			)
@@ -550,23 +536,32 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 				m.SetRcode(r, dns.RcodeServerFailure)
 				if err := w.WriteMsg(m); err != nil {
 					slog.Error(
-						fmt.Sprintf("failed to write response: %s", err),
+						fmt.Sprintf(
+							"failed to write response: %s",
+							err,
+						),
 					)
 				}
 				slog.Error(
-					fmt.Sprintf("failed to query domain nameserver: %s", err),
+					fmt.Sprintf(
+						"recursive query failed: domain=%s, error=%s",
+						r.Question[0].Name,
+						err,
+					),
 				)
 				return
-			} else {
-				copyResponse(r, resp, m)
-				// Send response
-				if err := w.WriteMsg(m); err != nil {
-					slog.Error(
-						fmt.Sprintf("failed to write response: %s", err),
-					)
-				}
-				return
 			}
+			copyResponse(r, resp, m)
+			// Send response
+			if err := w.WriteMsg(m); err != nil {
+				slog.Error(
+					fmt.Sprintf(
+						"failed to write response: %s",
+						err,
+					),
+				)
+			}
+			return
 		} else {
 			for nameserver, addresses := range nameservers {
 				// NS record
@@ -654,40 +649,263 @@ func copyResponse(req *dns.Msg, srcResp *dns.Msg, destResp *dns.Msg) {
 	}
 }
 
-func randomNameserverAddress(nameservers map[string][]net.IP) net.IP {
-	// Put all namserver addresses in single list
-	tmpNameserversIpv4 := []net.IP{}
-	tmpNameserversIpv6 := []net.IP{}
-	for _, addresses := range nameservers {
-		for _, address := range addresses {
-			if ip := address.To4(); ip != nil {
-				tmpNameserversIpv4 = append(tmpNameserversIpv4, address)
+// queryWithRetry executes a query function with retries
+// and exponential backoff.
+func queryWithRetry(
+	queryFn func() (*dns.Msg, error),
+	maxRetries int,
+	baseDelay time.Duration,
+) (*dns.Msg, error) {
+	if maxRetries <= 0 {
+		maxRetries = 1
+	}
+	var lastErr error
+	for attempt := range maxRetries {
+		result, err := queryFn()
+		if err == nil {
+			return result, nil
+		}
+		lastErr = err
+		// Don't sleep after the last attempt
+		if attempt < maxRetries-1 {
+			// Exponential backoff: baseDelay * 2^attempt
+			delay := baseDelay * time.Duration(1<<attempt)
+			time.Sleep(delay)
+		}
+	}
+	return nil, fmt.Errorf(
+		"query failed after %d attempts: %w",
+		maxRetries,
+		lastErr,
+	)
+}
+
+// queryMultipleNameservers tries multiple nameservers until
+// one succeeds, using the default DNS port (53).
+func queryMultipleNameservers(
+	msg *dns.Msg,
+	nameservers map[string][]net.IP,
+	recursive bool,
+	ctx *resolutionContext,
+) (*dns.Msg, error) {
+	return queryMultipleNameserversWithPort(
+		msg,
+		nameservers,
+		recursive,
+		ctx,
+		"53",
+	)
+}
+
+// queryMultipleNameserversWithPort tries multiple nameservers
+// until one succeeds. It shuffles the nameserver order and
+// uses retry logic for each server.
+func queryMultipleNameserversWithPort(
+	msg *dns.Msg,
+	nameservers map[string][]net.IP,
+	recursive bool,
+	ctx *resolutionContext,
+	port string,
+) (*dns.Msg, error) {
+	cfg := config.GetConfig()
+
+	// Flatten nameservers into a list of addresses,
+	// preferring IPv4 over IPv6
+	var ipv4Addrs []string
+	var ipv6Addrs []string
+	for _, ips := range nameservers {
+		for _, ip := range ips {
+			if ip.To4() != nil {
+				ipv4Addrs = append(
+					ipv4Addrs,
+					net.JoinHostPort(ip.String(), port),
+				)
 			} else {
-				tmpNameserversIpv6 = append(tmpNameserversIpv6, address)
+				ipv6Addrs = append(
+					ipv6Addrs,
+					net.JoinHostPort(ip.String(), port),
+				)
 			}
 		}
 	}
-	// Collect only IPv4 addresses unless we only have IPv6
-	// We can't guarantee that IPv6 works, so we try not to use it
-	var tmpNameservers []net.IP
-	if len(tmpNameserversIpv4) > 0 {
-		tmpNameservers = tmpNameserversIpv4
-	} else {
-		tmpNameservers = tmpNameserversIpv6
+
+	// Shuffle each group independently to distribute load
+	// while preserving IPv4-first preference
+	shuffleStrings(ipv4Addrs)
+	shuffleStrings(ipv6Addrs)
+
+	// Prefer IPv4, fall back to IPv6 if all IPv4 fail
+	addresses := make(
+		[]string,
+		0,
+		len(ipv4Addrs)+len(ipv6Addrs),
+	)
+	addresses = append(addresses, ipv4Addrs...)
+	addresses = append(addresses, ipv6Addrs...)
+
+	if len(addresses) == 0 {
+		return nil, errors.New("no nameserver addresses available")
 	}
-	if len(tmpNameservers) > 0 {
-		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(tmpNameservers))))
-		if err != nil {
-			return nil
+
+	var lastErr error
+	retryCount := cfg.Dns.RetryCount
+	if retryCount <= 0 {
+		retryCount = 1
+	}
+	baseDelay := time.Duration(
+		cfg.Dns.RetryDelayMs,
+	) * time.Millisecond
+	timeout := time.Duration(
+		cfg.Dns.QueryTimeoutMs,
+	) * time.Millisecond
+
+	for _, addr := range addresses {
+		client := &dns.Client{
+			Timeout: timeout,
 		}
-		tmpNameserver := tmpNameservers[n.Int64()]
-		return tmpNameserver
+		queryFn := func() (*dns.Msg, error) {
+			resp, _, exchangeErr := client.Exchange(
+				msg,
+				addr,
+			)
+			if exchangeErr == nil && resp == nil {
+				return nil, fmt.Errorf(
+					"nil response from %s",
+					addr,
+				)
+			}
+			return resp, exchangeErr
+		}
+
+		resp, err := queryWithRetry(
+			queryFn,
+			retryCount,
+			baseDelay,
+		)
+		if err != nil {
+			slog.Debug(
+				fmt.Sprintf(
+					"nameserver query failed: address=%s, error=%s",
+					addr,
+					err,
+				),
+			)
+			lastErr = err
+			continue
+		}
+
+		// Treat SERVFAIL/REFUSED as failures and try next
+		if resp.Rcode == dns.RcodeServerFailure ||
+			resp.Rcode == dns.RcodeRefused {
+			slog.Debug(
+				fmt.Sprintf(
+					"nameserver returned error rcode: address=%s, rcode=%s",
+					addr,
+					dns.RcodeToString[resp.Rcode],
+				),
+			)
+			lastErr = fmt.Errorf(
+				"server %s returned %s",
+				addr,
+				dns.RcodeToString[resp.Rcode],
+			)
+			continue
+		}
+
+		// If recursive and got a referral, follow it
+		if recursive &&
+			!resp.Authoritative &&
+			len(resp.Ns) > 0 {
+			result, referralErr := handleReferral(
+				msg,
+				resp,
+				ctx,
+			)
+			if referralErr == nil {
+				return result, nil
+			}
+			slog.Debug(
+				fmt.Sprintf(
+					"referral failed: address=%s, error=%s",
+					addr,
+					referralErr,
+				),
+			)
+			lastErr = referralErr
+			continue
+		}
+
+		return resp, nil
 	}
-	return nil
+
+	return nil, fmt.Errorf(
+		"all nameservers failed: %w",
+		lastErr,
+	)
 }
 
-// doQueryWithContext performs a DNS query with resolution context for depth tracking.
-// It wraps the existing doQuery logic with context awareness.
+// shuffleStrings randomly reorders a slice of strings
+// using crypto/rand.
+func shuffleStrings(s []string) {
+	for i := len(s) - 1; i > 0; i-- {
+		n, err := rand.Int(
+			rand.Reader,
+			big.NewInt(int64(i+1)),
+		)
+		if err != nil {
+			continue
+		}
+		j := n.Int64()
+		s[i], s[j] = s[j], s[i]
+	}
+}
+
+// handleReferral processes a DNS referral response and
+// follows the delegation.
+func handleReferral(
+	msg *dns.Msg,
+	resp *dns.Msg,
+	ctx *resolutionContext,
+) (*dns.Msg, error) {
+	if ctx.atMaxDepth() {
+		return resp, nil // Return referral as-is if at max depth
+	}
+
+	nameservers := getNameserversFromResponse(resp)
+
+	// Resolve missing glue records
+	childCtx := ctx.descend()
+	for nsName, nsIPs := range nameservers {
+		if len(nsIPs) == 0 {
+			resolvedIPs, err := resolveNameserverAddress(
+				nsName,
+				childCtx,
+			)
+			if err != nil {
+				slog.Debug(
+					fmt.Sprintf(
+						"failed to resolve NS glue: ns=%s, error=%s",
+						nsName,
+						err,
+					),
+				)
+				continue
+			}
+			nameservers[nsName] = resolvedIPs
+		}
+	}
+
+	return queryMultipleNameservers(
+		msg,
+		nameservers,
+		true,
+		childCtx,
+	)
+}
+
+// doQueryWithContext performs a DNS query with resolution
+// context for depth tracking. It uses retry logic and
+// configurable timeouts.
 func doQueryWithContext(
 	msg *dns.Msg,
 	address string,
@@ -698,82 +916,34 @@ func doQueryWithContext(
 		return nil, errors.New("max resolution depth exceeded")
 	}
 
-	// Add default port if not specified
-	if _, _, err := net.SplitHostPort(address); err != nil {
-		address = net.JoinHostPort(address, "53")
-	}
-
-	resp, err := dns.Exchange(msg, address)
+	// Parse host and port, defaulting to port 53
+	host, port, err := net.SplitHostPort(address)
 	if err != nil {
-		return nil, err
+		// No port specified, treat as host-only
+		host = address
+		port = "53"
 	}
 
-	// If we got an authoritative answer or non-recursive mode, return
-	if resp.Authoritative || !recursive {
-		return resp, nil
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return nil, fmt.Errorf(
+			"invalid IP address: %s",
+			host,
+		)
 	}
 
-	// Handle referrals (NS records in authority section)
-	if len(resp.Ns) > 0 {
-		nameservers := getNameserversFromResponse(resp)
-
-		// Try to resolve missing glue records
-		childCtx := ctx.descend()
-		for nsName, nsIPs := range nameservers {
-			if len(nsIPs) == 0 {
-				resolvedIPs, err := resolveNameserverAddress(nsName, childCtx)
-				if err != nil {
-					slog.Debug(
-						fmt.Sprintf(
-							"failed to resolve NS address: ns=%s, error=%s",
-							nsName,
-							err,
-						),
-					)
-					continue
-				}
-				nameservers[nsName] = resolvedIPs
-			}
-		}
-
-		// Pick a random nameserver that has addresses
-		availableNS := make([]string, 0, len(nameservers))
-		for nsName, nsIPs := range nameservers {
-			if len(nsIPs) > 0 {
-				availableNS = append(availableNS, nsName)
-			}
-		}
-
-		if len(availableNS) > 0 {
-			n, err := rand.Int(rand.Reader, big.NewInt(int64(len(availableNS))))
-			if err != nil {
-				return nil, fmt.Errorf("random selection failed: %w", err)
-			}
-			randNS := availableNS[n.Int64()]
-			randIP := nameservers[randNS][0]
-			if len(nameservers[randNS]) > 1 {
-				ipIdx, err := rand.Int(
-					rand.Reader,
-					big.NewInt(int64(len(nameservers[randNS]))),
-				)
-				if err != nil {
-					return nil, fmt.Errorf(
-						"random IP selection failed: %w",
-						err,
-					)
-				}
-				randIP = nameservers[randNS][ipIdx.Int64()]
-			}
-			return doQueryWithContext(
-				msg,
-				net.JoinHostPort(randIP.String(), "53"),
-				recursive,
-				childCtx,
-			)
-		}
+	// Create nameserver map with single entry
+	nameservers := map[string][]net.IP{
+		"initial": {ip},
 	}
 
-	return resp, nil
+	return queryMultipleNameserversWithPort(
+		msg,
+		nameservers,
+		recursive,
+		ctx,
+		port,
+	)
 }
 
 func findNameserversForDomain(
