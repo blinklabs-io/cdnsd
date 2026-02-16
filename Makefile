@@ -15,7 +15,7 @@ GO_LDFLAGS=-ldflags "-s -w -X '$(GOMODULE)/internal/version.Version=$(shell git 
 
 .PHONY: build mod-tidy clean format golines test nilaway
 
-# Alias for building program binarys
+# Alias for building program binaries
 build: $(BINARIES)
 
 mod-tidy:
