@@ -759,11 +759,15 @@ func doQueryWithContext(
 				return nil, fmt.Errorf("random selection failed: %w", err)
 			}
 			randNS := availableNS[n.Int64()]
-			randIP := nameservers[randNS][0]
-			if len(nameservers[randNS]) > 1 {
+			nsIPs := nameservers[randNS]
+			if len(nsIPs) == 0 {
+				return resp, nil
+			}
+			randIP := nsIPs[0]
+			if len(nsIPs) > 1 {
 				ipIdx, err := rand.Int(
 					rand.Reader,
-					big.NewInt(int64(len(nameservers[randNS]))),
+					big.NewInt(int64(len(nsIPs))),
 				)
 				if err != nil {
 					return nil, fmt.Errorf(
@@ -771,7 +775,7 @@ func doQueryWithContext(
 						err,
 					)
 				}
-				randIP = nameservers[randNS][ipIdx.Int64()]
+				randIP = nsIPs[ipIdx.Int64()]
 			}
 			return doQueryWithContext(
 				msg,
