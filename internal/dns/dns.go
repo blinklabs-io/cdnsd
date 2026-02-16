@@ -722,6 +722,9 @@ func doQueryWithContext(
 	// Handle referrals (NS records in authority section)
 	if len(resp.Ns) > 0 {
 		nameservers := getNameserversFromResponse(resp)
+		if nameservers == nil {
+			return resp, nil
+		}
 
 		// Try to resolve missing glue records
 		childCtx := ctx.descend()
