@@ -238,7 +238,7 @@ func (p *Proof) hashInternal(
 	right []byte,
 ) []byte {
 	h, err := blake2b.New256(nil)
-	if err != nil || h == nil {
+	if err != nil {
 		panic("blake2b.New256 failed")
 	}
 	if len(prefix) == 0 {
@@ -259,7 +259,7 @@ func (p *Proof) hashInternal(
 
 func (p *Proof) hashLeaf(key []byte, hash []byte) []byte {
 	h, err := blake2b.New256(nil)
-	if err != nil || h == nil {
+	if err != nil {
 		panic("blake2b.New256 failed")
 	}
 	h.Write(ProofLeaf)
@@ -270,7 +270,7 @@ func (p *Proof) hashLeaf(key []byte, hash []byte) []byte {
 
 func (p *Proof) hashValue(key []byte, value []byte) []byte {
 	h, err := blake2b.New256(nil)
-	if err != nil || h == nil {
+	if err != nil {
 		panic("blake2b.New256 failed")
 	}
 	h.Write(value)
