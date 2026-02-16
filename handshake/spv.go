@@ -45,6 +45,9 @@ func (n *ProofNode) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &tmpData); err != nil {
 		return err
 	}
+	if len(tmpData) < 2 {
+		return fmt.Errorf("invalid proof node data: expected 2 elements, got %d", len(tmpData))
+	}
 	tmpDataPrefix, tmpDataNode := tmpData[0], tmpData[1]
 	tmpPrefix, prefixSize, err := decodePrefixFromString(tmpDataPrefix)
 	if err != nil {
@@ -234,7 +237,10 @@ func (p *Proof) hashInternal(
 	left []byte,
 	right []byte,
 ) []byte {
-	h, _ := blake2b.New256(nil)
+	h, err := blake2b.New256(nil)
+	if err != nil || h == nil {
+		panic("blake2b.New256 failed")
+	}
 	if len(prefix) == 0 {
 		h.Write(ProofInternal)
 		h.Write(left)
@@ -252,7 +258,10 @@ func (p *Proof) hashInternal(
 }
 
 func (p *Proof) hashLeaf(key []byte, hash []byte) []byte {
-	h, _ := blake2b.New256(nil)
+	h, err := blake2b.New256(nil)
+	if err != nil || h == nil {
+		panic("blake2b.New256 failed")
+	}
 	h.Write(ProofLeaf)
 	h.Write(key)
 	h.Write(hash)
@@ -260,7 +269,10 @@ func (p *Proof) hashLeaf(key []byte, hash []byte) []byte {
 }
 
 func (p *Proof) hashValue(key []byte, value []byte) []byte {
-	h, _ := blake2b.New256(nil)
+	h, err := blake2b.New256(nil)
+	if err != nil || h == nil {
+		panic("blake2b.New256 failed")
+	}
 	h.Write(value)
 	tmpSum := h.Sum(nil)
 	return p.hashLeaf(key, tmpSum)

@@ -56,7 +56,10 @@ func NewPeer(conn net.Conn, network Network) (*Peer, error) {
 	}
 	if conn != nil {
 		p.conn = conn
-		p.address = conn.RemoteAddr().String()
+		remoteAddr := conn.RemoteAddr()
+		if remoteAddr != nil {
+			p.address = remoteAddr.String()
+		}
 		p.hasConnected = true
 		if err := p.setupConnection(); err != nil {
 			_ = p.conn.Close()

@@ -159,7 +159,10 @@ func (h *BlockHeader) shareHash() [32]byte {
 	_, _ = sha3Hasher.Write(data)
 	_, _ = sha3Hasher.Write(h.padding(8))
 	right := sha3Hasher.Sum(nil)
-	finalHasher, _ := blake2b.New256(nil)
+	finalHasher, err := blake2b.New256(nil)
+	if err != nil || finalHasher == nil {
+		panic("blake2b.New256 failed")
+	}
 	_, _ = finalHasher.Write(left[:])
 	_, _ = finalHasher.Write(h.padding(32))
 	_, _ = finalHasher.Write(right[:])

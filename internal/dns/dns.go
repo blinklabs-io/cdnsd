@@ -147,6 +147,9 @@ func resolveNameserverAddress(
 			err,
 		)
 	}
+	if resp == nil {
+		return nil, fmt.Errorf("received nil response for %s", nsName)
+	}
 
 	// Extract A/AAAA records from response
 	for _, rr := range resp.Answer {
@@ -707,6 +710,9 @@ func doQueryWithContext(
 	if err != nil {
 		return nil, err
 	}
+	if resp == nil {
+		return nil, fmt.Errorf("received nil response from %s", address)
+	}
 
 	// If we got an authoritative answer or non-recursive mode, return
 	if resp.Authoritative || !recursive {
@@ -920,7 +926,7 @@ func findNameserversForDomain(
 }
 
 func getNameserversFromResponse(msg *dns.Msg) map[string][]net.IP {
-	if len(msg.Ns) == 0 {
+	if msg == nil || len(msg.Ns) == 0 {
 		return nil
 	}
 	ret := map[string][]net.IP{}
