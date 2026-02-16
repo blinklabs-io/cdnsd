@@ -15,7 +15,7 @@ GO_LDFLAGS=-ldflags "-s -w -X '$(GOMODULE)/internal/version.Version=$(shell git 
 
 .PHONY: build mod-tidy clean format golines test nilaway
 
-# Alias for building program binary
+# Alias for building program binarys
 build: $(BINARIES)
 
 mod-tidy:
@@ -36,7 +36,7 @@ test: mod-tidy
 	go test -v -race ./...
 
 nilaway: mod-tidy
-	go run go.uber.org/nilaway/cmd/nilaway@latest ./...
+	go run go.uber.org/nilaway/cmd/nilaway@v0.0.0-20260213150243-937701de96c7 ./...
 
 # Build our program binaries
 # Depends on GO_FILES to determine when rebuild is needed
