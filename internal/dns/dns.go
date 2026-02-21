@@ -147,6 +147,9 @@ func resolveNameserverAddress(
 			err,
 		)
 	}
+	if resp == nil {
+		return nil, fmt.Errorf("received nil response for %s", nsName)
+	}
 
 	// Extract A/AAAA records from response
 	for _, rr := range resp.Answer {
@@ -707,6 +710,9 @@ func doQueryWithContext(
 	if err != nil {
 		return nil, err
 	}
+	if resp == nil {
+		return nil, fmt.Errorf("received nil response from %s", address)
+	}
 
 	// If we got an authoritative answer or non-recursive mode, return
 	if resp.Authoritative || !recursive {
@@ -716,6 +722,9 @@ func doQueryWithContext(
 	// Handle referrals (NS records in authority section)
 	if len(resp.Ns) > 0 {
 		nameservers := getNameserversFromResponse(resp)
+		if nameservers == nil {
+			return resp, nil
+		}
 
 		// Try to resolve missing glue records
 		childCtx := ctx.descend()
@@ -750,11 +759,15 @@ func doQueryWithContext(
 				return nil, fmt.Errorf("random selection failed: %w", err)
 			}
 			randNS := availableNS[n.Int64()]
-			randIP := nameservers[randNS][0]
-			if len(nameservers[randNS]) > 1 {
+			nsIPs := nameservers[randNS]
+			if len(nsIPs) == 0 {
+				return resp, nil
+			}
+			randIP := nsIPs[0]
+			if len(nsIPs) > 1 {
 				ipIdx, err := rand.Int(
 					rand.Reader,
-					big.NewInt(int64(len(nameservers[randNS]))),
+					big.NewInt(int64(len(nsIPs))),
 				)
 				if err != nil {
 					return nil, fmt.Errorf(
@@ -762,7 +775,7 @@ func doQueryWithContext(
 						err,
 					)
 				}
-				randIP = nameservers[randNS][ipIdx.Int64()]
+				randIP = nsIPs[ipIdx.Int64()]
 			}
 			return doQueryWithContext(
 				msg,
@@ -920,7 +933,7 @@ func findNameserversForDomain(
 }
 
 func getNameserversFromResponse(msg *dns.Msg) map[string][]net.IP {
-	if len(msg.Ns) == 0 {
+	if msg == nil || len(msg.Ns) == 0 {
 		return nil
 	}
 	ret := map[string][]net.IP{}

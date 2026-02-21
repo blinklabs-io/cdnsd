@@ -159,7 +159,7 @@ func (m *MsgVersion) Encode() []byte {
 	// Nonce
 	_ = binary.Write(buf, binary.LittleEndian, m.Nonce[:])
 	// User agent string length
-	_ = buf.WriteByte(byte(len(m.Agent)))
+	_ = buf.WriteByte(byte(len(m.Agent))) //nolint:gosec
 	// User agent string
 	_, _ = buf.WriteString(m.Agent)
 	// Block height
