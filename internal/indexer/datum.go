@@ -21,44 +21,47 @@ type DNSReferenceRefScriptDatum struct {
 }
 
 func (d *DNSReferenceRefScriptDatum) UnmarshalCBOR(cborData []byte) error {
-	var tmpData cbor.Constructor
+	var tmpData cbor.ConstructorDecoder
 	if _, err := cbor.Decode(cborData, &tmpData); err != nil {
 		return err
 	}
-	if tmpData.Constructor() != 3 {
+	if tmpData.Tag() != 3 {
 		return fmt.Errorf(
 			"unexpected outer constructor index: %d",
-			tmpData.Constructor(),
+			tmpData.Tag(),
 		)
 	}
-	tmpDataFields := tmpData.Fields()
+	tmpDataFields, err := tmpData.ParsedFields()
+	if err != nil {
+		return err
+	}
 	if len(tmpDataFields) != 1 {
 		return fmt.Errorf(
 			"unexpected inner field count: expected 1, got %d",
 			len(tmpDataFields),
 		)
 	}
-	fieldInner, ok := tmpDataFields[0].(cbor.Constructor)
+	fieldInner, ok := tmpDataFields[0].(cbor.ConstructorDecoder)
 	if !ok {
 		return fmt.Errorf(
 			"unexpected data type %T for outer constructor field",
 			tmpDataFields[0],
 		)
 	}
-	var tmpDataInner cbor.Constructor
+	var tmpDataInner cbor.ConstructorDecoder
 	if _, err := cbor.Decode(fieldInner.Cbor(), &tmpDataInner); err != nil {
 		return err
 	}
-	if tmpDataInner.Constructor() != 1 {
+	if tmpDataInner.Tag() != 1 {
 		return fmt.Errorf(
 			"unexpected inner constructor index: %d",
-			tmpDataInner.Constructor(),
+			tmpDataInner.Tag(),
 		)
 	}
 	// Decode constr field data without using our custom decode function
 	type tDNSReferenceRefScriptDatum DNSReferenceRefScriptDatum
 	var tmpScriptDatum tDNSReferenceRefScriptDatum
-	if _, err := cbor.Decode(tmpDataInner.FieldsCbor(), &tmpScriptDatum); err != nil {
+	if _, err := cbor.Decode(tmpDataInner.Fields(), &tmpScriptDatum); err != nil {
 		return err
 	}
 	*d = DNSReferenceRefScriptDatum(tmpScriptDatum)
