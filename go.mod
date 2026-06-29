@@ -3,7 +3,7 @@ module github.com/blinklabs-io/cdnsd
 go 1.25.7
 
 require (
-	github.com/blinklabs-io/adder v0.41.0
+	github.com/blinklabs-io/adder v0.42.0
 	github.com/blinklabs-io/cardano-models v0.7.2
 	github.com/blinklabs-io/gouroboros v0.184.0
 	github.com/dgraph-io/badger/v4 v4.9.2
