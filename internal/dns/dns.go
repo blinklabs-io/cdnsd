@@ -8,6 +8,7 @@ package dns
 
 import (
 	"crypto/rand"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -341,6 +342,10 @@ func Start() error {
 	if err := loadRootHints(cfg); err != nil {
 		return err
 	}
+	tlsConfig, err := loadConfiguredTLSConfig(cfg)
+	if err != nil {
+		return err
+	}
 	// Setup handler
 	dns.HandleFunc(".", handleQuery)
 	// UDP listener
@@ -360,7 +365,7 @@ func Start() error {
 	}
 	go startListener(serverTcp)
 	// TLS listener
-	if cfg.Tls.CertFilePath != "" && cfg.Tls.KeyFilePath != "" {
+	if tlsConfig != nil {
 		listenTlsAddr := fmt.Sprintf(
 			"%s:%d",
 			cfg.Dns.ListenAddress,
@@ -370,11 +375,43 @@ func Start() error {
 			Addr:       listenTlsAddr,
 			Net:        "tcp-tls",
 			TsigSecret: nil,
+			TLSConfig:  tlsConfig,
 			ReusePort:  false,
 		}
 		go startListener(serverTls)
 	}
 	return nil
+}
+
+func loadConfiguredTLSConfig(cfg *config.Config) (*tls.Config, error) {
+	if cfg.Tls.CertFilePath == "" && cfg.Tls.KeyFilePath == "" {
+		slog.Info(
+			"TLS listener disabled: TLS certificate and key file paths are not configured",
+		)
+		return nil, nil
+	}
+	if cfg.Tls.CertFilePath == "" || cfg.Tls.KeyFilePath == "" {
+		return nil, errors.New(
+			"TLS certificate and key file paths must both be configured",
+		)
+	}
+	return loadTLSConfig(
+		cfg.Tls.CertFilePath,
+		cfg.Tls.KeyFilePath,
+	)
+}
+
+func loadTLSConfig(
+	certFilePath string,
+	keyFilePath string,
+) (*tls.Config, error) {
+	cert, err := tls.LoadX509KeyPair(certFilePath, keyFilePath)
+	if err != nil {
+		return nil, fmt.Errorf("load TLS certificate: %w", err)
+	}
+	return &tls.Config{
+		Certificates: []tls.Certificate{cert},
+	}, nil
 }
 
 func loadRootHints(cfg *config.Config) error {
