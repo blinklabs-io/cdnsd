@@ -8,10 +8,12 @@ package dns
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/big"
@@ -27,6 +29,84 @@ import (
 	"github.com/blinklabs-io/cdnsd/internal/state"
 	"github.com/miekg/dns"
 )
+
+func TestStartReturnsShutdownHandle(t *testing.T) {
+	cfg := config.GetConfig()
+	oldDNS := cfg.Dns
+	oldTLS := cfg.Tls
+	cfg.Dns.ListenAddress = "127.0.0.1"
+	cfg.Dns.ListenPort = 0
+	cfg.Dns.ListenTlsPort = 0
+	cfg.Tls.CertFilePath = ""
+	cfg.Tls.KeyFilePath = ""
+	t.Cleanup(func() {
+		cfg.Dns = oldDNS
+		cfg.Tls = oldTLS
+	})
+
+	srv, err := Start()
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if srv == nil {
+		t.Fatal("Start() returned nil server")
+	}
+
+	select {
+	case err := <-srv.Errors():
+		t.Fatalf("unexpected listener error: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown() error = %v", err)
+	}
+	if err := srv.Close(); err != nil {
+		t.Fatalf("Close() after Shutdown() error = %v", err)
+	}
+}
+
+func TestStartDNSListenersIgnoresUnrelatedRuntimeError(t *testing.T) {
+	handler := dns.HandlerFunc(func(w dns.ResponseWriter, r *dns.Msg) {})
+	servers := []*dns.Server{
+		{
+			Addr:    "127.0.0.1:0",
+			Net:     "udp",
+			Handler: handler,
+		},
+		{
+			Addr:    "127.0.0.1:0",
+			Net:     "tcp",
+			Handler: handler,
+		},
+	}
+	srv := &Server{
+		servers: servers,
+		errCh:   make(chan error, len(servers)+1),
+	}
+	runtimeErr := errors.New("previous listener failed")
+	srv.errCh <- runtimeErr
+
+	if err := startDNSListeners(srv, servers); err != nil {
+		t.Fatalf("startDNSListeners() error = %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown() error = %v", err)
+	}
+
+	select {
+	case err := <-srv.Errors():
+		if !errors.Is(err, runtimeErr) {
+			t.Fatalf("unexpected runtime error = %v", err)
+		}
+	default:
+		t.Fatal("expected runtime error to remain pending")
+	}
+}
 
 func TestResolutionContextDefaults(t *testing.T) {
 	ctx := newResolutionContext()
@@ -457,6 +537,18 @@ func TestResolveNameserverAddressCycleDetection(t *testing.T) {
 	}
 	if ips != nil {
 		t.Error("expected nil result for cycle")
+	}
+}
+
+func TestResolveNameserverAddressWithoutState(t *testing.T) {
+	resolver := &Resolver{}
+	ctx := newResolutionContext()
+	ips, err := resolver.resolveNameserverAddress("ns.example.com.", ctx)
+	if err == nil {
+		t.Fatal("expected error without state or root hints")
+	}
+	if len(ips) != 0 {
+		t.Errorf("expected no IPs, got %v", ips)
 	}
 }
 

@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/blinklabs-io/cdnsd/internal/config"
@@ -37,8 +38,11 @@ const (
 )
 
 type State struct {
-	db      *badger.DB
-	gcTimer *time.Ticker
+	db       *badger.DB
+	gcTimer  *time.Ticker
+	gcStopCh chan struct{}
+	gcDoneCh chan struct{}
+	mu       sync.Mutex
 }
 
 type DomainRecord struct {
@@ -66,18 +70,34 @@ func (s *State) Load() error {
 	if err != nil {
 		return err
 	}
+	s.mu.Lock()
 	s.db = db
+	s.mu.Unlock()
 	// Make sure existing DB matches current config options
 	if err := s.compareFingerprint(); err != nil {
+		_ = s.Close()
 		return err
 	}
 	// Run GC periodically for Badger DB
-	s.gcTimer = time.NewTicker(5 * time.Minute)
-	go func() {
-		for range s.gcTimer.C {
+	gcTimer := time.NewTicker(5 * time.Minute)
+	gcStopCh := make(chan struct{})
+	gcDoneCh := make(chan struct{})
+	s.mu.Lock()
+	s.gcTimer = gcTimer
+	s.gcStopCh = gcStopCh
+	s.gcDoneCh = gcDoneCh
+	s.mu.Unlock()
+	go func(db *badger.DB) {
+		defer close(gcDoneCh)
+		for {
+			select {
+			case <-gcTimer.C:
+			case <-gcStopCh:
+				return
+			}
 		again:
 			slog.Debug("database: running GC")
-			err := s.db.RunValueLogGC(0.5)
+			err := db.RunValueLogGC(0.5)
 			if err != nil {
 				// Log any actual errors
 				if !errors.Is(err, badger.ErrNoRewrite) {
@@ -93,7 +113,7 @@ func (s *State) Load() error {
 				goto again
 			}
 		}
-	}()
+	}(db)
 	return nil
 }
 
@@ -462,6 +482,34 @@ func (s *State) LookupHandshakeRecords(
 
 func GetState() *State {
 	return globalState
+}
+
+// Close stops background state maintenance and closes the Badger database.
+func (s *State) Close() error {
+	s.mu.Lock()
+	db := s.db
+	gcTimer := s.gcTimer
+	gcStopCh := s.gcStopCh
+	gcDoneCh := s.gcDoneCh
+	s.db = nil
+	s.gcTimer = nil
+	s.gcStopCh = nil
+	s.gcDoneCh = nil
+	if gcTimer != nil {
+		gcTimer.Stop()
+	}
+	if gcStopCh != nil {
+		close(gcStopCh)
+	}
+	s.mu.Unlock()
+
+	if gcDoneCh != nil {
+		<-gcDoneCh
+	}
+	if db == nil {
+		return nil
+	}
+	return db.Close()
 }
 
 // BadgerLogger is a wrapper type to give our logger the expected interface

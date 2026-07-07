@@ -7,6 +7,7 @@
 package dns
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/tls"
 	"errors"
@@ -15,10 +16,10 @@ import (
 	"maps"
 	"math/big"
 	"net"
-	"os"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/blinklabs-io/cdnsd/internal/config"
@@ -193,6 +194,57 @@ func (r *Resolver) resolveNameserverAddress(
 	return ips, nil
 }
 
+// Server owns the DNS listeners started by Start.
+type Server struct {
+	servers []*dns.Server
+	errCh   chan error
+
+	stopOnce sync.Once
+	stopErr  error
+}
+
+// Errors returns asynchronous listener failures.
+func (s *Server) Errors() <-chan error {
+	if s == nil {
+		return nil
+	}
+	return s.errCh
+}
+
+// Shutdown gracefully stops all DNS listeners.
+func (s *Server) Shutdown(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	s.stopOnce.Do(func() {
+		var errs []error
+		for _, server := range s.servers {
+			if err := server.ShutdownContext(ctx); err != nil && !isServerNotStarted(err) {
+				errs = append(errs, err)
+			}
+		}
+		s.stopErr = errors.Join(errs...)
+	})
+	return s.stopErr
+}
+
+// Close stops all DNS listeners without a deadline.
+func (s *Server) Close() error {
+	return s.Shutdown(context.Background())
+}
+
+func (s *Server) reportError(err error) {
+	select {
+	case s.errCh <- err:
+	default:
+		slog.Error("DNS listener error", "error", err)
+	}
+}
+
+func isServerNotStarted(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "server not started")
+}
+
 // getRandomRootServer returns a random root server address from hints
 func (r *Resolver) getRandomRootServer() string {
 	if r == nil || r.rootHints == nil {
@@ -343,7 +395,7 @@ func findZoneForName(name string) string {
 	return ""
 }
 
-func Start() error {
+func Start() (*Server, error) {
 	cfg := config.GetConfig()
 	listenAddr := fmt.Sprintf(
 		"%s:%d",
@@ -355,14 +407,15 @@ func Start() error {
 	)
 	resolver, err := NewResolver(cfg)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	tlsConfig, err := loadConfiguredTLSConfig(cfg)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	mux := dns.NewServeMux()
 	mux.HandleFunc(".", resolver.handleQuery)
+	servers := []*dns.Server{}
 	// UDP listener
 	serverUdp := &dns.Server{
 		Addr:       listenAddr,
@@ -371,7 +424,7 @@ func Start() error {
 		TsigSecret: nil,
 		ReusePort:  true,
 	}
-	go startListener(serverUdp)
+	servers = append(servers, serverUdp)
 	// TCP listener
 	serverTcp := &dns.Server{
 		Addr:       listenAddr,
@@ -380,7 +433,7 @@ func Start() error {
 		TsigSecret: nil,
 		ReusePort:  true,
 	}
-	go startListener(serverTcp)
+	servers = append(servers, serverTcp)
 	// TLS listener
 	if tlsConfig != nil {
 		listenTlsAddr := fmt.Sprintf(
@@ -396,7 +449,38 @@ func Start() error {
 			TLSConfig:  tlsConfig,
 			ReusePort:  false,
 		}
-		go startListener(serverTls)
+		servers = append(servers, serverTls)
+	}
+	server := &Server{
+		servers: servers,
+		errCh:   make(chan error, len(servers)),
+	}
+	if err := startDNSListeners(server, servers); err != nil {
+		return nil, err
+	}
+	return server, nil
+}
+
+func startDNSListeners(server *Server, servers []*dns.Server) error {
+	startedServers := make([]*dns.Server, 0, len(servers))
+	for _, listener := range servers {
+		readyCh := make(chan struct{})
+		startupErrCh := make(chan error, 1)
+		var readyOnce sync.Once
+		listener.NotifyStartedFunc = func() {
+			readyOnce.Do(func() {
+				close(readyCh)
+			})
+		}
+		go startListener(server, listener, readyCh, startupErrCh)
+		select {
+		case <-readyCh:
+			startedServers = append(startedServers, listener)
+		case err := <-startupErrCh:
+			server.servers = startedServers
+			_ = server.Close()
+			return err
+		}
 	}
 	return nil
 }
@@ -429,6 +513,7 @@ func loadTLSConfig(
 	}
 	return &tls.Config{
 		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS12,
 	}, nil
 }
 
@@ -454,12 +539,24 @@ func (r *Resolver) loadRootHints(cfg *config.Config) error {
 	return nil
 }
 
-func startListener(server *dns.Server) {
-	if err := server.ListenAndServe(); err != nil {
-		slog.Error(
-			fmt.Sprintf("failed to start DNS listener: %s", err),
-		)
-		os.Exit(1)
+func startListener(
+	server *Server,
+	listener *dns.Server,
+	readyCh <-chan struct{},
+	startupErrCh chan<- error,
+) {
+	if err := listener.ListenAndServe(); err != nil {
+		err = fmt.Errorf("DNS %s listener failed: %w", listener.Net, err)
+		select {
+		case <-readyCh:
+			server.reportError(err)
+		default:
+			select {
+			case startupErrCh <- err:
+			default:
+				server.reportError(err)
+			}
+		}
 	}
 }
 

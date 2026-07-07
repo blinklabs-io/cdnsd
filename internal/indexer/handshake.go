@@ -29,18 +29,43 @@ type handshakeState struct {
 	hasLastBlock     bool
 }
 
-func (i *Indexer) startHandshake() error {
+func (i *Indexer) startHandshake(stopCh <-chan struct{}) error {
 	cfg := config.GetConfig()
 	if cfg.Indexer.HandshakeAddress == "" {
 		return nil
 	}
 	i.handshakeState.peerAddress = cfg.Indexer.HandshakeAddress
+	i.handshakeState.peerBackoffDelay = 0
 	// Start peer (re)connect loop
-	go i.handshakeReconnectPeer()
+	i.handshakeWg.Add(1)
+	go func() {
+		defer i.handshakeWg.Done()
+		i.handshakeReconnectPeer(stopCh)
+	}()
 	return nil
 }
 
-func (i *Indexer) handshakeConnectPeer() error {
+func (i *Indexer) handshakePeer() *handshake.Peer {
+	i.handshakeMu.Lock()
+	defer i.handshakeMu.Unlock()
+	return i.handshakeState.peer
+}
+
+func (i *Indexer) setHandshakePeer(peer *handshake.Peer) {
+	i.handshakeMu.Lock()
+	defer i.handshakeMu.Unlock()
+	i.handshakeState.peer = peer
+}
+
+func (i *Indexer) clearHandshakePeer(peer *handshake.Peer) {
+	i.handshakeMu.Lock()
+	defer i.handshakeMu.Unlock()
+	if peer == nil || i.handshakeState.peer == peer {
+		i.handshakeState.peer = nil
+	}
+}
+
+func (i *Indexer) handshakeConnectPeer(stopCh <-chan struct{}) error {
 	slog.Info(
 		"connecting to Handshake peer",
 		"address",
@@ -50,26 +75,36 @@ func (i *Indexer) handshakeConnectPeer() error {
 	if err != nil {
 		return err
 	}
-	i.handshakeState.peer = p
-	if err := i.handshakeState.peer.Connect(i.handshakeState.peerAddress); err != nil {
+	if err := p.Connect(i.handshakeState.peerAddress); err != nil {
+		i.clearHandshakePeer(p)
 		return err
+	}
+	i.setHandshakePeer(p)
+	select {
+	case <-stopCh:
+		_ = p.Close()
+		i.clearHandshakePeer(p)
+		return nil
+	default:
 	}
 	// Async error handler
 	go func() {
 		select {
-		case err := <-i.handshakeState.peer.ErrorChan():
+		case err := <-p.ErrorChan():
 			slog.Error(
 				"Handshake peer disconnected",
 				"error",
 				err,
 			)
-		case <-i.handshakeState.peer.DoneChan():
+		case <-p.DoneChan():
 			// Stop waiting on connection shutdown
 		}
 	}()
 	var locator [][32]byte = nil
 	cursorBlockHash, err := state.GetState().GetHandshakeCursor()
 	if err != nil {
+		_ = p.Close()
+		i.clearHandshakePeer(p)
 		return err
 	}
 	if cursorBlockHash != "" {
@@ -78,6 +113,8 @@ func (i *Indexer) handshakeConnectPeer() error {
 		)
 		hashBytes, err := hex.DecodeString(cursorBlockHash)
 		if err != nil {
+			_ = p.Close()
+			i.clearHandshakePeer(p)
 			return err
 		}
 		if len(hashBytes) != 32 {
@@ -85,6 +122,8 @@ func (i *Indexer) handshakeConnectPeer() error {
 			slog.Error(
 				fmt.Sprintf("bad Handshake cursor block hash: %x", hashBytes),
 			)
+			_ = p.Close()
+			i.clearHandshakePeer(p)
 			return errors.New("bad Handshake locator")
 		}
 		locator = [][32]byte{[32]byte(hashBytes)}
@@ -92,23 +131,39 @@ func (i *Indexer) handshakeConnectPeer() error {
 		i.handshakeState.hasLastBlock = true
 	}
 	// Start sync
-	if err := i.handshakeState.peer.Sync(locator, i.handshakeHandleSync); err != nil {
-		_ = i.handshakeState.peer.Close()
+	if err := p.Sync(locator, i.handshakeHandleSync); err != nil {
+		_ = p.Close()
+		i.clearHandshakePeer(p)
 		return err
 	}
 	return nil
 }
 
-func (i *Indexer) handshakeReconnectPeer() {
+func (i *Indexer) handshakeReconnectPeer(stopCh <-chan struct{}) {
 	var err error
 	// Try reconnecting to peer until we are successful
 	for {
-		err = i.handshakeConnectPeer()
+		select {
+		case <-stopCh:
+			return
+		default:
+		}
+		err = i.handshakeConnectPeer(stopCh)
 		if err == nil {
+			peer := i.handshakePeer()
+			if peer == nil {
+				continue
+			}
 			// Reset backoff delay
 			i.handshakeState.peerBackoffDelay = 0
 			// Wait for connection close
-			<-i.handshakeState.peer.DoneChan()
+			select {
+			case <-peer.DoneChan():
+				i.clearHandshakePeer(peer)
+			case <-stopCh:
+				_ = i.closeHandshakePeer()
+				return
+			}
 			continue
 		}
 		if i.handshakeState.peerBackoffDelay == 0 {
@@ -129,7 +184,18 @@ func (i *Indexer) handshakeReconnectPeer() {
 			"delay",
 			i.handshakeState.peerBackoffDelay.String(),
 		)
-		time.Sleep(i.handshakeState.peerBackoffDelay)
+		timer := time.NewTimer(i.handshakeState.peerBackoffDelay)
+		select {
+		case <-timer.C:
+		case <-stopCh:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return
+		}
 	}
 }
 
