@@ -409,9 +409,14 @@ func startListener(server *dns.Server) {
 }
 
 func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
-	if r.Question == nil {
+	if r == nil {
 		return
 	}
+	if len(r.Question) != 1 {
+		writeFormatError(w, r)
+		return
+	}
+
 	cfg := config.GetConfig()
 	m := new(dns.Msg)
 
@@ -615,6 +620,19 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 	if zone != "" {
 		m.Ns = append(m.Ns, generateSyntheticSOA(zone))
 	}
+	if err := w.WriteMsg(m); err != nil {
+		slog.Error(
+			fmt.Sprintf("failed to write response: %s", err),
+		)
+	}
+}
+
+func writeFormatError(w dns.ResponseWriter, r *dns.Msg) {
+	if w == nil || r == nil {
+		return
+	}
+	m := new(dns.Msg)
+	m.SetRcodeFormatError(r)
 	if err := w.WriteMsg(m); err != nil {
 		slog.Error(
 			fmt.Sprintf("failed to write response: %s", err),

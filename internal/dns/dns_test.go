@@ -83,6 +83,128 @@ func stateIsLoaded() bool {
 	return loaded
 }
 
+type captureResponseWriter struct {
+	msg *dns.Msg
+	raw []byte
+}
+
+func (w *captureResponseWriter) LocalAddr() net.Addr {
+	return &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 53}
+}
+
+func (w *captureResponseWriter) RemoteAddr() net.Addr {
+	return &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 12345}
+}
+
+func (w *captureResponseWriter) WriteMsg(msg *dns.Msg) error {
+	w.msg = msg.Copy()
+	return nil
+}
+
+func (w *captureResponseWriter) Write(raw []byte) (int, error) {
+	w.raw = append([]byte(nil), raw...)
+	return len(raw), nil
+}
+
+func (w *captureResponseWriter) Close() error {
+	return nil
+}
+
+func (w *captureResponseWriter) TsigStatus() error {
+	return nil
+}
+
+func (w *captureResponseWriter) TsigTimersOnly(bool) {}
+
+func (w *captureResponseWriter) Hijack() {}
+
+func TestHandleQueryMalformedQuestionCounts(t *testing.T) {
+	question := dns.Question{
+		Name:   "example.com.",
+		Qtype:  dns.TypeA,
+		Qclass: dns.ClassINET,
+	}
+	testCases := []struct {
+		name      string
+		questions []dns.Question
+	}{
+		{
+			name:      "nil questions",
+			questions: nil,
+		},
+		{
+			name:      "empty questions",
+			questions: []dns.Question{},
+		},
+		{
+			name: "multiple questions",
+			questions: []dns.Question{
+				question,
+				{
+					Name:   "example.net.",
+					Qtype:  dns.TypeAAAA,
+					Qclass: dns.ClassINET,
+				},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := &dns.Msg{
+				MsgHdr: dns.MsgHdr{
+					Id:               1234,
+					RecursionDesired: true,
+				},
+				Question: tc.questions,
+			}
+			w := &captureResponseWriter{}
+
+			handleQuery(w, req)
+
+			if w.msg == nil {
+				t.Fatal("expected response")
+			}
+			if w.msg.Id != req.Id {
+				t.Errorf(
+					"expected response id %d, got %d",
+					req.Id,
+					w.msg.Id,
+				)
+			}
+			if !w.msg.Response {
+				t.Error("expected response bit to be set")
+			}
+			if w.msg.Rcode != dns.RcodeFormatError {
+				t.Errorf(
+					"expected FORMERR, got %s",
+					dns.RcodeToString[w.msg.Rcode],
+				)
+			}
+			if len(w.msg.Question) != 0 {
+				t.Errorf(
+					"expected no echoed questions, got %d",
+					len(w.msg.Question),
+				)
+			}
+		})
+	}
+}
+
+func TestHandleQueryNilRequestDoesNotPanic(t *testing.T) {
+	w := &captureResponseWriter{}
+	defer func() {
+		if err := recover(); err != nil {
+			t.Fatalf("handleQuery panicked: %v", err)
+		}
+		if w.msg != nil {
+			t.Fatal("expected no response for nil request")
+		}
+	}()
+
+	handleQuery(w, nil)
+}
+
 func TestResolveNameserverAddressFromLocal(t *testing.T) {
 	// This test requires state to be initialized with a database
 	// Skip if state not available (will be tested via integration)
