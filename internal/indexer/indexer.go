@@ -12,8 +12,8 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
-	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/blinklabs-io/adder/event"
@@ -62,6 +62,11 @@ type Indexer struct {
 	syncStatus     input_chainsync.ChainSyncStatus
 	watched        []watchedAddr
 	handshakeState handshakeState
+	handshakeMu    sync.Mutex
+	handshakeWg    sync.WaitGroup
+	errorCh        chan error
+	stopCh         chan struct{}
+	stopOnce       sync.Once
 }
 
 type watchedAddr struct {
@@ -74,21 +79,40 @@ type watchedAddr struct {
 // Singleton indexer instance
 var globalIndexer = &Indexer{
 	domains: make(map[string]Domain),
+	errorCh: make(chan error, 10),
+	stopCh:  make(chan struct{}),
 }
 
 func (i *Indexer) Start() error {
-	if err := i.startCardano(); err != nil {
+	if i.errorCh == nil {
+		i.errorCh = make(chan error, 10)
+	}
+	if i.stopCh == nil {
+		i.stopCh = make(chan struct{})
+		i.stopOnce = sync.Once{}
+	} else {
+		select {
+		case <-i.stopCh:
+			i.stopCh = make(chan struct{})
+			i.stopOnce = sync.Once{}
+		default:
+		}
+	}
+	stopCh := i.stopCh
+	if err := i.startCardano(stopCh); err != nil {
 		return err
 	}
-	if err := i.startHandshake(); err != nil {
+	if err := i.startHandshake(stopCh); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (i *Indexer) startCardano() error {
+func (i *Indexer) startCardano(stopCh <-chan struct{}) error {
 	// Build watched addresses from enabled profiles
 	cfg := config.GetConfig()
+	i.watched = nil
+	i.tipReached = false
 	for _, profile := range config.GetProfiles() {
 		if profile.ScriptAddress != "" {
 			// Add a static TLD mapping
@@ -230,23 +254,26 @@ func (i *Indexer) startCardano() error {
 	i.pipeline.AddOutput(output)
 	// Start pipeline
 	if err := i.pipeline.Start(); err != nil {
-		slog.Error(
-			fmt.Sprintf("failed to start pipeline: %s\n", err),
-		)
-		os.Exit(1)
+		return fmt.Errorf("failed to start pipeline: %w", err)
 	}
 	// Start error handler
-	go func() {
-		err, ok := <-i.pipeline.ErrorChan()
-		if ok {
-			slog.Error(
-				fmt.Sprintf("pipeline failed: %s\n", err),
-			)
-			os.Exit(1)
+	go func(errorCh <-chan error) {
+		for {
+			select {
+			case err, ok := <-errorCh:
+				if !ok {
+					return
+				}
+				if err != nil {
+					i.reportError(fmt.Errorf("pipeline failed: %w", err))
+				}
+			case <-stopCh:
+				return
+			}
 		}
-	}()
+	}(i.pipeline.ErrorChan())
 	// Schedule periodic catch-up sync log messages
-	i.scheduleSyncStatusLog()
+	i.scheduleSyncStatusLog(stopCh)
 	return nil
 }
 
@@ -496,11 +523,23 @@ func (i *Indexer) handleEventOutputDiscovery(
 	return nil
 }
 
-func (i *Indexer) scheduleSyncStatusLog() {
-	i.syncLogTimer = time.AfterFunc(syncStatusLogInterval, i.syncStatusLog)
+func (i *Indexer) scheduleSyncStatusLog(stopCh <-chan struct{}) {
+	select {
+	case <-stopCh:
+		return
+	default:
+	}
+	i.syncLogTimer = time.AfterFunc(syncStatusLogInterval, func() {
+		i.syncStatusLog(stopCh)
+	})
 }
 
-func (i *Indexer) syncStatusLog() {
+func (i *Indexer) syncStatusLog(stopCh <-chan struct{}) {
+	select {
+	case <-stopCh:
+		return
+	default:
+	}
 	slog.Info(
 		fmt.Sprintf(
 			"catch-up sync in progress: at %d.%s (current tip slot is %d)",
@@ -509,13 +548,75 @@ func (i *Indexer) syncStatusLog() {
 			i.syncStatus.TipSlotNumber,
 		),
 	)
-	i.scheduleSyncStatusLog()
+	i.scheduleSyncStatusLog(stopCh)
 }
 
 func (i *Indexer) LookupDomain(name string) *Domain {
 	if domain, ok := i.domains[name]; ok {
 		return &domain
 	}
+	return nil
+}
+
+// Errors returns asynchronous indexer failures.
+func (i *Indexer) Errors() <-chan error {
+	if i == nil {
+		return nil
+	}
+	return i.errorCh
+}
+
+func (i *Indexer) reportError(err error) {
+	select {
+	case i.errorCh <- err:
+	default:
+		slog.Error("indexer error", "error", err)
+	}
+}
+
+// Stop shuts down indexer background work.
+func (i *Indexer) Stop() error {
+	if i == nil {
+		return nil
+	}
+	var errs []error
+	i.stopOnce.Do(func() {
+		if i.stopCh != nil {
+			close(i.stopCh)
+		}
+		if i.syncLogTimer != nil {
+			i.syncLogTimer.Stop()
+			i.syncLogTimer = nil
+		}
+		if err := i.closeHandshakePeer(); err != nil {
+			errs = append(errs, err)
+		}
+		if i.pipeline != nil {
+			if err := i.pipeline.Stop(); err != nil {
+				errs = append(errs, err)
+			}
+		}
+		i.handshakeWg.Wait()
+	})
+	return errors.Join(errs...)
+}
+
+func (i *Indexer) closeHandshakePeer() error {
+	peer := i.handshakePeer()
+	if peer == nil {
+		return nil
+	}
+	select {
+	case <-peer.DoneChan():
+		i.clearHandshakePeer(peer)
+		return nil
+	default:
+	}
+	if err := peer.Close(); err != nil &&
+		!strings.Contains(err.Error(), "connection is not established") {
+		return err
+	}
+	i.clearHandshakePeer(peer)
 	return nil
 }
 
