@@ -596,6 +596,41 @@ func TestThirdPartyDNSDelegation(t *testing.T) {
 	}
 }
 
+func TestHandleReferralWithoutGlueSkipsUnloadedState(t *testing.T) {
+	msg := new(dns.Msg)
+	msg.SetQuestion("example.test.", dns.TypeA)
+
+	referral := new(dns.Msg)
+	referral.SetReply(msg)
+	referral.Ns = []dns.RR{
+		&dns.NS{
+			Hdr: dns.RR_Header{
+				Name:   "example.test.",
+				Rrtype: dns.TypeNS,
+				Class:  dns.ClassINET,
+				Ttl:    300,
+			},
+			Ns: "ns.external.test.",
+		},
+	}
+
+	resolver := &Resolver{}
+	ctx := newResolutionContext()
+	defer func() {
+		if err := recover(); err != nil {
+			t.Fatalf("handleReferral panicked: %v", err)
+		}
+	}()
+
+	resp, err := resolver.handleReferral(msg, referral, ctx)
+	if err == nil {
+		t.Fatal("expected referral resolution error with no root hints")
+	}
+	if resp != nil {
+		t.Fatal("expected nil response when referral resolution fails")
+	}
+}
+
 func TestGenerateSyntheticSOA(t *testing.T) {
 	soa := generateSyntheticSOA("ada.")
 	if soa == nil {

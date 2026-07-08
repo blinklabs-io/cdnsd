@@ -111,38 +111,40 @@ func (r *Resolver) resolveNameserverAddress(
 
 	var ips []net.IP
 
-	// Try local Cardano records first
-	aRecords, err := state.GetState().LookupRecords(
-		[]string{"A", "AAAA"},
-		nsName,
-	)
-	if err != nil {
-		return nil, err
-	}
-	for _, record := range aRecords {
-		if ip := net.ParseIP(record.Rhs); ip != nil {
-			ips = append(ips, ip)
+	if stateAvailable() {
+		// Try local Cardano records first
+		aRecords, err := state.GetState().LookupRecords(
+			[]string{"A", "AAAA"},
+			nsName,
+		)
+		if err != nil {
+			return nil, err
 		}
-	}
-	if len(ips) > 0 {
-		return ips, nil
-	}
+		for _, record := range aRecords {
+			if ip := net.ParseIP(record.Rhs); ip != nil {
+				ips = append(ips, ip)
+			}
+		}
+		if len(ips) > 0 {
+			return ips, nil
+		}
 
-	// Try local Handshake records
-	hsRecords, err := state.GetState().LookupHandshakeRecords(
-		[]string{"A", "AAAA"},
-		nsName,
-	)
-	if err != nil {
-		return nil, err
-	}
-	for _, record := range hsRecords {
-		if ip := net.ParseIP(record.Rhs); ip != nil {
-			ips = append(ips, ip)
+		// Try local Handshake records
+		hsRecords, err := state.GetState().LookupHandshakeRecords(
+			[]string{"A", "AAAA"},
+			nsName,
+		)
+		if err != nil {
+			return nil, err
 		}
-	}
-	if len(ips) > 0 {
-		return ips, nil
+		for _, record := range hsRecords {
+			if ip := net.ParseIP(record.Rhs); ip != nil {
+				ips = append(ips, ip)
+			}
+		}
+		if len(ips) > 0 {
+			return ips, nil
+		}
 	}
 
 	// Not found locally - resolve via upstream using root hints
