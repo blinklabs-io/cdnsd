@@ -292,6 +292,7 @@ func (w *captureResponseWriter) TsigTimersOnly(bool) {}
 func (w *captureResponseWriter) Hijack() {}
 
 func TestHandleQueryMalformedQuestionCounts(t *testing.T) {
+	resolver := &Resolver{}
 	question := dns.Question{
 		Name:   "example.com.",
 		Qtype:  dns.TypeA,
@@ -333,7 +334,7 @@ func TestHandleQueryMalformedQuestionCounts(t *testing.T) {
 			}
 			w := &captureResponseWriter{}
 
-			handleQuery(w, req)
+			resolver.handleQuery(w, req)
 
 			if w.msg == nil {
 				t.Fatal("expected response")
@@ -365,6 +366,7 @@ func TestHandleQueryMalformedQuestionCounts(t *testing.T) {
 }
 
 func TestHandleQueryNilRequestDoesNotPanic(t *testing.T) {
+	resolver := &Resolver{}
 	w := &captureResponseWriter{}
 	defer func() {
 		if err := recover(); err != nil {
@@ -375,7 +377,39 @@ func TestHandleQueryNilRequestDoesNotPanic(t *testing.T) {
 		}
 	}()
 
-	handleQuery(w, nil)
+	resolver.handleQuery(w, nil)
+}
+
+func TestNewResolverLoadsRootHints(t *testing.T) {
+	cfg := *config.GetConfig()
+	cfg.Dns.RootHints = strings.Join(
+		[]string{
+			". 3600000 IN NS A.ROOT-TEST.",
+			"A.ROOT-TEST. 3600000 IN A 192.0.2.1",
+			"A.ROOT-TEST. 3600000 IN AAAA 2001:db8::1",
+		},
+		"\n",
+	)
+
+	resolver, err := NewResolver(&cfg)
+	if err != nil {
+		t.Fatalf("unexpected resolver error: %v", err)
+	}
+	if resolver.rootHints == nil {
+		t.Fatal("expected root hints to be initialized")
+	}
+	if len(resolver.rootHints[dns.TypeNS]["."]) != 1 {
+		t.Errorf("expected one root NS hint")
+	}
+	if len(resolver.rootHints[dns.TypeA]["A.ROOT-TEST."]) != 1 {
+		t.Errorf("expected one root A hint")
+	}
+	if len(resolver.rootHints[dns.TypeAAAA]["A.ROOT-TEST."]) != 1 {
+		t.Errorf("expected one root AAAA hint")
+	}
+	if rootNS := resolver.getRandomRootServer(); rootNS != "192.0.2.1:53" {
+		t.Errorf("expected root server 192.0.2.1:53, got %q", rootNS)
+	}
 }
 
 func TestResolveNameserverAddressFromLocal(t *testing.T) {
@@ -385,10 +419,11 @@ func TestResolveNameserverAddressFromLocal(t *testing.T) {
 		t.Skip("state database not loaded")
 	}
 
+	resolver := &Resolver{}
 	ctx := newResolutionContext()
 	// Resolving a nonexistent nameserver should return an error
 	// (no local records, upstream resolution will fail)
-	ips, err := resolveNameserverAddress("nonexistent.example.com.", ctx)
+	ips, err := resolver.resolveNameserverAddress("nonexistent.example.com.", ctx)
 	if err == nil {
 		t.Error("expected error for nonexistent nameserver")
 	}
@@ -398,10 +433,11 @@ func TestResolveNameserverAddressFromLocal(t *testing.T) {
 }
 
 func TestResolveNameserverAddressDepthLimit(t *testing.T) {
+	resolver := &Resolver{}
 	ctx := newResolutionContext()
 	ctx.depth = ctx.maxDepth // Already at max depth
 
-	ips, err := resolveNameserverAddress("any.example.com.", ctx)
+	ips, err := resolver.resolveNameserverAddress("any.example.com.", ctx)
 	if err == nil {
 		t.Error("expected error at max depth")
 	}
@@ -411,10 +447,11 @@ func TestResolveNameserverAddressDepthLimit(t *testing.T) {
 }
 
 func TestResolveNameserverAddressCycleDetection(t *testing.T) {
+	resolver := &Resolver{}
 	ctx := newResolutionContext()
 	ctx.markVisited("ns.example.com.") // Mark as already visited
 
-	ips, err := resolveNameserverAddress("ns.example.com.", ctx)
+	ips, err := resolver.resolveNameserverAddress("ns.example.com.", ctx)
 	if err == nil {
 		t.Error("expected error for cycle detection")
 	}
@@ -432,8 +469,9 @@ func TestDoQueryWithContextBasic(t *testing.T) {
 	msg := new(dns.Msg)
 	msg.SetQuestion("example.com.", dns.TypeA)
 
+	resolver := &Resolver{}
 	// This should work against a public resolver
-	resp, err := doQueryWithContext(msg, "8.8.8.8:53", false, ctx)
+	resp, err := resolver.doQueryWithContext(msg, "8.8.8.8:53", false, ctx)
 	if err != nil {
 		t.Skipf("network unavailable: %v", err)
 	}
@@ -459,9 +497,13 @@ func TestResolveNameserverAddressUpstream(t *testing.T) {
 		t.Skip("config not initialized")
 	}
 
+	resolver, err := NewResolver(cfg)
+	if err != nil {
+		t.Fatalf("unexpected resolver error: %v", err)
+	}
 	ctx := newResolutionContext()
 	// Try to resolve a well-known nameserver
-	ips, err := resolveNameserverAddress("a.root-servers.net.", ctx)
+	ips, err := resolver.resolveNameserverAddress("a.root-servers.net.", ctx)
 	if err != nil {
 		t.Logf("warning: upstream resolution failed: %v", err)
 		// Don't fail - network may not be available
@@ -485,7 +527,8 @@ func TestFindNameserversResolvesGlue(t *testing.T) {
 
 	// Test with a domain known to use external nameservers
 	// blinklabs.io is mentioned in the issue as an example
-	_, nsMap, err := findNameserversForDomain("blinklabs.io.")
+	resolver := &Resolver{}
+	_, nsMap, err := resolver.findNameserversForDomain("blinklabs.io.")
 	if err != nil {
 		t.Skipf("could not test: %v", err)
 	}
@@ -519,17 +562,25 @@ func TestThirdPartyDNSDelegation(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			cfg := config.GetConfig()
+			if cfg == nil {
+				t.Skip("config not initialized")
+			}
+			resolver, err := NewResolver(cfg)
+			if err != nil {
+				t.Fatalf("unexpected resolver error: %v", err)
+			}
 			ctx := newResolutionContext()
 			msg := new(dns.Msg)
 			msg.SetQuestion(tc.domain, dns.TypeA)
 
 			// Start from root
-			rootNS := getRandomRootServer()
+			rootNS := resolver.getRandomRootServer()
 			if rootNS == "" {
 				t.Skip("no root servers configured")
 			}
 
-			resp, err := doQueryWithContext(msg, rootNS, true, ctx)
+			resp, err := resolver.doQueryWithContext(msg, rootNS, true, ctx)
 			if err != nil {
 				t.Skipf("network error: %v", err)
 			}
@@ -894,7 +945,8 @@ func TestQueryMultipleNameservers(t *testing.T) {
 	msg := new(dns.Msg)
 	msg.SetQuestion("example.com.", dns.TypeA)
 
-	resp, err := queryMultipleNameserversWithPort(
+	resolver := &Resolver{}
+	resp, err := resolver.queryMultipleNameserversWithPort(
 		msg,
 		nameservers,
 		false,
@@ -946,7 +998,8 @@ func TestQueryMultipleNameserversFailover(t *testing.T) {
 	msg := new(dns.Msg)
 	msg.SetQuestion("example.com.", dns.TypeA)
 
-	resp, err := queryMultipleNameserversWithPort(
+	resolver := &Resolver{}
+	resp, err := resolver.queryMultipleNameserversWithPort(
 		msg,
 		nameservers,
 		false,
@@ -968,7 +1021,8 @@ func TestQueryMultipleNameserversNoAddresses(t *testing.T) {
 
 	nameservers := map[string][]net.IP{}
 
-	_, err := queryMultipleNameservers(
+	resolver := &Resolver{}
+	_, err := resolver.queryMultipleNameservers(
 		msg,
 		nameservers,
 		false,
@@ -998,7 +1052,8 @@ func TestQueryTimeoutRespected(t *testing.T) {
 	msg.SetQuestion("example.com.", dns.TypeA)
 
 	start := time.Now()
-	_, err := doQueryWithContext(
+	resolver := &Resolver{}
+	_, err := resolver.doQueryWithContext(
 		msg,
 		"192.0.2.1:53",
 		false,
@@ -1075,7 +1130,8 @@ func TestServfailRetriedBeforeFailover(t *testing.T) {
 	msg := new(dns.Msg)
 	msg.SetQuestion("example.com.", dns.TypeA)
 
-	resp, err := doQueryWithContext(
+	resolver := &Resolver{}
+	resp, err := resolver.doQueryWithContext(
 		msg,
 		addr,
 		false,
