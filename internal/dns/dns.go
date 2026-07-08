@@ -37,6 +37,21 @@ var metricQueryTotal = promauto.NewCounter(prometheus.CounterOpts{
 	Help: "total DNS queries handled",
 })
 
+// Resolver handles DNS queries using configured root hints for
+// recursive resolution.
+type Resolver struct {
+	rootHints map[uint16]map[string][]dns.RR
+}
+
+// NewResolver creates a resolver from the provided config.
+func NewResolver(cfg *config.Config) (*Resolver, error) {
+	resolver := &Resolver{}
+	if err := resolver.loadRootHints(cfg); err != nil {
+		return nil, err
+	}
+	return resolver, nil
+}
+
 // resolutionContext tracks state during recursive DNS resolution
 // to prevent infinite loops and limit recursion depth.
 type resolutionContext struct {
@@ -78,7 +93,7 @@ func (c *resolutionContext) descend() *resolutionContext {
 // resolveNameserverAddress attempts to resolve A/AAAA records for a nameserver.
 // It first checks local storage (Cardano/Handshake), then falls back to
 // recursive resolution via upstream nameservers.
-func resolveNameserverAddress(
+func (r *Resolver) resolveNameserverAddress(
 	nsName string,
 	ctx *resolutionContext,
 ) ([]net.IP, error) {
@@ -96,38 +111,40 @@ func resolveNameserverAddress(
 
 	var ips []net.IP
 
-	// Try local Cardano records first
-	aRecords, err := state.GetState().LookupRecords(
-		[]string{"A", "AAAA"},
-		nsName,
-	)
-	if err != nil {
-		return nil, err
-	}
-	for _, record := range aRecords {
-		if ip := net.ParseIP(record.Rhs); ip != nil {
-			ips = append(ips, ip)
+	if stateAvailable() {
+		// Try local Cardano records first
+		aRecords, err := state.GetState().LookupRecords(
+			[]string{"A", "AAAA"},
+			nsName,
+		)
+		if err != nil {
+			return nil, err
 		}
-	}
-	if len(ips) > 0 {
-		return ips, nil
-	}
+		for _, record := range aRecords {
+			if ip := net.ParseIP(record.Rhs); ip != nil {
+				ips = append(ips, ip)
+			}
+		}
+		if len(ips) > 0 {
+			return ips, nil
+		}
 
-	// Try local Handshake records
-	hsRecords, err := state.GetState().LookupHandshakeRecords(
-		[]string{"A", "AAAA"},
-		nsName,
-	)
-	if err != nil {
-		return nil, err
-	}
-	for _, record := range hsRecords {
-		if ip := net.ParseIP(record.Rhs); ip != nil {
-			ips = append(ips, ip)
+		// Try local Handshake records
+		hsRecords, err := state.GetState().LookupHandshakeRecords(
+			[]string{"A", "AAAA"},
+			nsName,
+		)
+		if err != nil {
+			return nil, err
 		}
-	}
-	if len(ips) > 0 {
-		return ips, nil
+		for _, record := range hsRecords {
+			if ip := net.ParseIP(record.Rhs); ip != nil {
+				ips = append(ips, ip)
+			}
+		}
+		if len(ips) > 0 {
+			return ips, nil
+		}
 	}
 
 	// Not found locally - resolve via upstream using root hints
@@ -139,12 +156,12 @@ func resolveNameserverAddress(
 	msg.RecursionDesired = true
 
 	// Start from root hints and resolve iteratively
-	rootNS := getRandomRootServer()
+	rootNS := r.getRandomRootServer()
 	if rootNS == "" {
 		return nil, errors.New("no root servers available")
 	}
 
-	resp, err := doQueryWithContext(msg, rootNS, true, childCtx)
+	resp, err := r.doQueryWithContext(msg, rootNS, true, childCtx)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"upstream resolution failed for %s: %w",
@@ -176,19 +193,17 @@ func resolveNameserverAddress(
 	return ips, nil
 }
 
-var rootHints map[uint16]map[string][]dns.RR
-
 // getRandomRootServer returns a random root server address from hints
-func getRandomRootServer() string {
-	if rootHints == nil {
+func (r *Resolver) getRandomRootServer() string {
+	if r == nil || r.rootHints == nil {
 		return ""
 	}
-	if rootHints[dns.TypeA] == nil {
+	if r.rootHints[dns.TypeA] == nil {
 		return ""
 	}
 	// Collect all A records
 	var servers []string
-	for _, rrs := range rootHints[dns.TypeA] {
+	for _, rrs := range r.rootHints[dns.TypeA] {
 		for _, rr := range rrs {
 			if a, ok := rr.(*dns.A); ok {
 				servers = append(servers, net.JoinHostPort(a.A.String(), "53"))
@@ -338,20 +353,21 @@ func Start() error {
 	slog.Info(
 		"starting DNS listener on " + listenAddr,
 	)
-	// Load root hints
-	if err := loadRootHints(cfg); err != nil {
+	resolver, err := NewResolver(cfg)
+	if err != nil {
 		return err
 	}
 	tlsConfig, err := loadConfiguredTLSConfig(cfg)
 	if err != nil {
 		return err
 	}
-	// Setup handler
-	dns.HandleFunc(".", handleQuery)
+	mux := dns.NewServeMux()
+	mux.HandleFunc(".", resolver.handleQuery)
 	// UDP listener
 	serverUdp := &dns.Server{
 		Addr:       listenAddr,
 		Net:        "udp",
+		Handler:    mux,
 		TsigSecret: nil,
 		ReusePort:  true,
 	}
@@ -360,6 +376,7 @@ func Start() error {
 	serverTcp := &dns.Server{
 		Addr:       listenAddr,
 		Net:        "tcp",
+		Handler:    mux,
 		TsigSecret: nil,
 		ReusePort:  true,
 	}
@@ -374,6 +391,7 @@ func Start() error {
 		serverTls := &dns.Server{
 			Addr:       listenTlsAddr,
 			Net:        "tcp-tls",
+			Handler:    mux,
 			TsigSecret: nil,
 			TLSConfig:  tlsConfig,
 			ReusePort:  false,
@@ -414,8 +432,8 @@ func loadTLSConfig(
 	}, nil
 }
 
-func loadRootHints(cfg *config.Config) error {
-	rootHints = make(map[uint16]map[string][]dns.RR)
+func (r *Resolver) loadRootHints(cfg *config.Config) error {
+	r.rootHints = make(map[uint16]map[string][]dns.RR)
 	for line := range strings.SplitSeq(cfg.Dns.RootHints, "\n") {
 		tmpRR, err := dns.NewRR(line)
 		if err != nil {
@@ -425,11 +443,11 @@ func loadRootHints(cfg *config.Config) error {
 			continue
 		}
 		rrType := tmpRR.Header().Rrtype
-		if _, ok := rootHints[rrType]; !ok {
-			rootHints[rrType] = make(map[string][]dns.RR)
+		if _, ok := r.rootHints[rrType]; !ok {
+			r.rootHints[rrType] = make(map[string][]dns.RR)
 		}
-		rootHints[rrType][tmpRR.Header().Name] = append(
-			rootHints[rrType][tmpRR.Header().Name],
+		r.rootHints[rrType][tmpRR.Header().Name] = append(
+			r.rootHints[rrType][tmpRR.Header().Name],
 			tmpRR,
 		)
 	}
@@ -445,12 +463,12 @@ func startListener(server *dns.Server) {
 	}
 }
 
-func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
-	if r == nil {
+func (r *Resolver) handleQuery(w dns.ResponseWriter, req *dns.Msg) {
+	if req == nil {
 		return
 	}
-	if len(r.Question) != 1 {
-		writeFormatError(w, r)
+	if len(req.Question) != 1 {
+		writeFormatError(w, req)
 		return
 	}
 
@@ -458,7 +476,7 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 	m := new(dns.Msg)
 
 	if cfg.Logging.QueryLog {
-		for _, q := range r.Question {
+		for _, q := range req.Question {
 			slog.Info(
 				fmt.Sprintf("query: name: %s, type: %s, class: %s",
 					q.Name,
@@ -472,8 +490,8 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 	metricQueryTotal.Inc()
 
 	// Check for known record from local storage
-	lookupRecordTypes := []uint16{r.Question[0].Qtype}
-	switch r.Question[0].Qtype {
+	lookupRecordTypes := []uint16{req.Question[0].Qtype}
+	switch req.Question[0].Qtype {
 	case dns.TypeA, dns.TypeAAAA:
 		// If the query is for A/AAAA, also try looking up matching CNAME records
 		lookupRecordTypes = append(lookupRecordTypes, dns.TypeCNAME)
@@ -482,7 +500,7 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 		// Try Cardano
 		records, err := state.GetState().LookupRecords(
 			[]string{dns.Type(lookupRecordType).String()},
-			strings.TrimSuffix(r.Question[0].Name, "."),
+			strings.TrimSuffix(req.Question[0].Name, "."),
 		)
 		if err != nil {
 			slog.Error(
@@ -494,7 +512,7 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 		if records == nil {
 			records, err = state.GetState().LookupHandshakeRecords(
 				[]string{dns.Type(lookupRecordType).String()},
-				strings.TrimSuffix(r.Question[0].Name, "."),
+				strings.TrimSuffix(req.Question[0].Name, "."),
 			)
 			if err != nil {
 				slog.Error(
@@ -505,7 +523,7 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 		}
 		if records != nil {
 			// Assemble response
-			m.SetReply(r)
+			m.SetReply(req)
 			m.Authoritative = true
 			for _, tmpRecord := range records {
 				tmpRR, err := stateRecordToDnsRR(tmpRecord)
@@ -533,10 +551,10 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 
 	// Handle SOA queries for blockchain TLDs when no explicit
 	// on-chain SOA was found
-	if r.Question[0].Qtype == dns.TypeSOA {
-		zone := findZoneForName(r.Question[0].Name)
+	if req.Question[0].Qtype == dns.TypeSOA {
+		zone := findZoneForName(req.Question[0].Name)
 		if zone != "" {
-			m.SetReply(r)
+			m.SetReply(req)
 			m.Authoritative = true
 			m.Answer = append(
 				m.Answer,
@@ -555,34 +573,34 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 	}
 
 	// Check for any NS records for parent domains from local storage
-	nameserverDomain, nameservers, err := findNameserversForDomain(
-		r.Question[0].Name,
+	nameserverDomain, nameservers, err := r.findNameserversForDomain(
+		req.Question[0].Name,
 	)
 	if err != nil {
 		slog.Error(
 			fmt.Sprintf(
 				"failed to lookup nameservers for %s: %s",
-				r.Question[0].Name,
+				req.Question[0].Name,
 				err,
 			),
 		)
 	}
 	if nameservers != nil {
 		// Assemble response
-		m.SetReply(r)
+		m.SetReply(req)
 		if cfg.Dns.RecursionEnabled {
 			ctx := newResolutionContext()
 
 			// Try all nameservers with retry and failover
-			resp, err := queryMultipleNameservers(
-				r,
+			resp, err := r.queryMultipleNameservers(
+				req,
 				nameservers,
 				true,
 				ctx,
 			)
 			if err != nil {
 				// Send failure response
-				m.SetRcode(r, dns.RcodeServerFailure)
+				m.SetRcode(req, dns.RcodeServerFailure)
 				if err := w.WriteMsg(m); err != nil {
 					slog.Error(
 						fmt.Sprintf(
@@ -594,13 +612,13 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 				slog.Error(
 					fmt.Sprintf(
 						"recursive query failed: domain=%s, error=%s",
-						r.Question[0].Name,
+						req.Question[0].Name,
 						err,
 					),
 				)
 				return
 			}
-			copyResponse(r, resp, m)
+			copyResponse(req, resp, m)
 			// Send response
 			if err := w.WriteMsg(m); err != nil {
 				slog.Error(
@@ -651,9 +669,9 @@ func handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 
 	// Return NXDOMAIN if we have no information about the
 	// requested domain or any of its parents
-	m.SetRcode(r, dns.RcodeNameError)
+	m.SetRcode(req, dns.RcodeNameError)
 	// Include SOA in authority section for blockchain zones
-	zone := findZoneForName(r.Question[0].Name)
+	zone := findZoneForName(req.Question[0].Name)
 	if zone != "" {
 		m.Ns = append(m.Ns, generateSyntheticSOA(zone))
 	}
@@ -744,13 +762,13 @@ func queryWithRetry(
 
 // queryMultipleNameservers tries multiple nameservers until
 // one succeeds, using the default DNS port (53).
-func queryMultipleNameservers(
+func (r *Resolver) queryMultipleNameservers(
 	msg *dns.Msg,
 	nameservers map[string][]net.IP,
 	recursive bool,
 	ctx *resolutionContext,
 ) (*dns.Msg, error) {
-	return queryMultipleNameserversWithPort(
+	return r.queryMultipleNameserversWithPort(
 		msg,
 		nameservers,
 		recursive,
@@ -762,7 +780,7 @@ func queryMultipleNameservers(
 // queryMultipleNameserversWithPort tries multiple nameservers
 // until one succeeds. It shuffles the nameserver order and
 // uses retry logic for each server.
-func queryMultipleNameserversWithPort(
+func (r *Resolver) queryMultipleNameserversWithPort(
 	msg *dns.Msg,
 	nameservers map[string][]net.IP,
 	recursive bool,
@@ -878,7 +896,7 @@ func queryMultipleNameserversWithPort(
 		if recursive &&
 			!resp.Authoritative &&
 			len(resp.Ns) > 0 {
-			result, referralErr := handleReferral(
+			result, referralErr := r.handleReferral(
 				msg,
 				resp,
 				ctx,
@@ -924,7 +942,7 @@ func shuffleStrings(s []string) {
 
 // handleReferral processes a DNS referral response and
 // follows the delegation.
-func handleReferral(
+func (r *Resolver) handleReferral(
 	msg *dns.Msg,
 	resp *dns.Msg,
 	ctx *resolutionContext,
@@ -942,7 +960,7 @@ func handleReferral(
 	childCtx := ctx.descend()
 	for nsName, nsIPs := range nameservers {
 		if len(nsIPs) == 0 {
-			resolvedIPs, err := resolveNameserverAddress(
+			resolvedIPs, err := r.resolveNameserverAddress(
 				nsName,
 				childCtx,
 			)
@@ -960,7 +978,7 @@ func handleReferral(
 		}
 	}
 
-	return queryMultipleNameservers(
+	return r.queryMultipleNameservers(
 		msg,
 		nameservers,
 		true,
@@ -971,7 +989,7 @@ func handleReferral(
 // doQueryWithContext performs a DNS query with resolution
 // context for depth tracking. It uses retry logic and
 // configurable timeouts.
-func doQueryWithContext(
+func (r *Resolver) doQueryWithContext(
 	msg *dns.Msg,
 	address string,
 	recursive bool,
@@ -1001,7 +1019,7 @@ func doQueryWithContext(
 		"initial": {ip},
 	}
 
-	return queryMultipleNameserversWithPort(
+	return r.queryMultipleNameserversWithPort(
 		msg,
 		nameservers,
 		recursive,
@@ -1010,7 +1028,7 @@ func doQueryWithContext(
 	)
 }
 
-func findNameserversForDomain(
+func (r *Resolver) findNameserversForDomain(
 	recordName string,
 ) (string, map[string][]net.IP, error) {
 	// Split record name into labels and lookup each domain and parent until we get a hit
@@ -1058,7 +1076,7 @@ func findNameserversForDomain(
 				// If no local records, try to resolve via upstream
 				if len(nsIPs) == 0 {
 					ctx := newResolutionContext()
-					resolvedIPs, resolveErr := resolveNameserverAddress(
+					resolvedIPs, resolveErr := r.resolveNameserverAddress(
 						nsName,
 						ctx,
 					)
@@ -1111,7 +1129,7 @@ func findNameserversForDomain(
 				// If no local records, try to resolve via upstream
 				if len(nsIPs) == 0 {
 					ctx := newResolutionContext()
-					resolvedIPs, resolveErr := resolveNameserverAddress(
+					resolvedIPs, resolveErr := r.resolveNameserverAddress(
 						nsName,
 						ctx,
 					)
@@ -1135,16 +1153,16 @@ func findNameserversForDomain(
 	}
 	// Return root hints
 	ret := map[string][]net.IP{}
-	if rootHints != nil && rootHints[dns.TypeNS] != nil {
-		for _, tmpRecord := range rootHints[dns.TypeNS][`.`] {
+	if r != nil && r.rootHints != nil && r.rootHints[dns.TypeNS] != nil {
+		for _, tmpRecord := range r.rootHints[dns.TypeNS][`.`] {
 			nsRec := tmpRecord.(*dns.NS).Ns
-			if rootHints[dns.TypeA] != nil {
-				for _, aRecord := range rootHints[dns.TypeA][nsRec] {
+			if r.rootHints[dns.TypeA] != nil {
+				for _, aRecord := range r.rootHints[dns.TypeA][nsRec] {
 					ret[nsRec] = append(ret[nsRec], aRecord.(*dns.A).A)
 				}
 			}
-			if rootHints[dns.TypeAAAA] != nil {
-				for _, aaaaRecord := range rootHints[dns.TypeAAAA][nsRec] {
+			if r.rootHints[dns.TypeAAAA] != nil {
+				for _, aaaaRecord := range r.rootHints[dns.TypeAAAA][nsRec] {
 					ret[nsRec] = append(ret[nsRec], aaaaRecord.(*dns.AAAA).AAAA)
 				}
 			}
