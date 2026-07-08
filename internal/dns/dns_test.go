@@ -7,8 +7,17 @@
 package dns
 
 import (
+	"bytes"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
+	"log/slog"
+	"math/big"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -62,6 +71,170 @@ func TestResolutionContextDepthLimit(t *testing.T) {
 	if !child3.atMaxDepth() {
 		t.Error("should be at max depth")
 	}
+}
+
+func TestLoadTLSConfig(t *testing.T) {
+	certFilePath, keyFilePath := writeTestCertificateFiles(t)
+
+	tlsConfig, err := loadTLSConfig(certFilePath, keyFilePath)
+	if err != nil {
+		t.Fatalf("unexpected error loading TLS config: %v", err)
+	}
+	if tlsConfig == nil {
+		t.Fatal("expected non-nil TLS config")
+	}
+	if len(tlsConfig.Certificates) != 1 {
+		t.Fatalf(
+			"expected one TLS certificate, got %d",
+			len(tlsConfig.Certificates),
+		)
+	}
+	if len(tlsConfig.Certificates[0].Certificate) == 0 {
+		t.Error("expected parsed certificate data")
+	}
+}
+
+func TestLoadTLSConfigReturnsLoadError(t *testing.T) {
+	dir := t.TempDir()
+	certFilePath := filepath.Join(dir, "cert.pem")
+	keyFilePath := filepath.Join(dir, "missing-key.pem")
+	if err := os.WriteFile(
+		certFilePath,
+		[]byte("invalid certificate"),
+		0o600,
+	); err != nil {
+		t.Fatalf("failed to write test cert: %v", err)
+	}
+
+	tlsConfig, err := loadTLSConfig(certFilePath, keyFilePath)
+	if err == nil {
+		t.Fatal("expected error loading invalid TLS config")
+	}
+	if tlsConfig != nil {
+		t.Fatal("expected nil TLS config on load error")
+	}
+	if !strings.Contains(err.Error(), "load TLS certificate") {
+		t.Fatalf("expected wrapped load error, got %v", err)
+	}
+}
+
+func TestLoadConfiguredTLSConfigReturnsErrorForPartialPaths(t *testing.T) {
+	testCases := []struct {
+		name         string
+		certFilePath string
+		keyFilePath  string
+	}{
+		{
+			name:         "cert only",
+			certFilePath: "cert.pem",
+		},
+		{
+			name:        "key only",
+			keyFilePath: "key.pem",
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			tlsConfig, err := loadConfiguredTLSConfig(
+				&config.Config{
+					Tls: config.TlsConfig{
+						CertFilePath: tc.certFilePath,
+						KeyFilePath:  tc.keyFilePath,
+					},
+				},
+			)
+			if err == nil {
+				t.Fatal("expected error for partial TLS config")
+			}
+			if tlsConfig != nil {
+				t.Fatal("expected nil TLS config on partial TLS config")
+			}
+			if !strings.Contains(
+				err.Error(),
+				"must both be configured",
+			) {
+				t.Fatalf("expected partial TLS config error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestLoadConfiguredTLSConfigLogsInfoWhenPathsEmpty(t *testing.T) {
+	var logOutput bytes.Buffer
+	originalLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logOutput, nil)))
+	t.Cleanup(func() {
+		slog.SetDefault(originalLogger)
+	})
+
+	tlsConfig, err := loadConfiguredTLSConfig(&config.Config{})
+	if err != nil {
+		t.Fatalf("unexpected error for empty TLS config: %v", err)
+	}
+	if tlsConfig != nil {
+		t.Fatal("expected nil TLS config for empty TLS config")
+	}
+	if !strings.Contains(logOutput.String(), "TLS listener disabled") {
+		t.Fatalf("expected TLS disabled log, got %q", logOutput.String())
+	}
+	if !strings.Contains(logOutput.String(), "level=INFO") {
+		t.Fatalf("expected TLS disabled log at info level, got %q", logOutput.String())
+	}
+	if strings.Contains(logOutput.String(), "level=WARN") {
+		t.Fatalf("expected TLS disabled log not to warn, got %q", logOutput.String())
+	}
+}
+
+func writeTestCertificateFiles(t *testing.T) (string, string) {
+	t.Helper()
+
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("failed to generate private key: %v", err)
+	}
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage: x509.KeyUsageKeyEncipherment |
+			x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{
+			x509.ExtKeyUsageServerAuth,
+		},
+		DNSNames:              []string{"localhost"},
+		BasicConstraintsValid: true,
+	}
+	certDER, err := x509.CreateCertificate(
+		rand.Reader,
+		template,
+		template,
+		&privateKey.PublicKey,
+		privateKey,
+	)
+	if err != nil {
+		t.Fatalf("failed to create certificate: %v", err)
+	}
+
+	dir := t.TempDir()
+	certFilePath := filepath.Join(dir, "cert.pem")
+	keyFilePath := filepath.Join(dir, "key.pem")
+	certPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: certDER,
+	})
+	keyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
+	})
+
+	if err := os.WriteFile(certFilePath, certPEM, 0o600); err != nil {
+		t.Fatalf("failed to write certificate: %v", err)
+	}
+	if err := os.WriteFile(keyFilePath, keyPEM, 0o600); err != nil {
+		t.Fatalf("failed to write private key: %v", err)
+	}
+
+	return certFilePath, keyFilePath
 }
 
 // stateIsLoaded checks if the state database is properly initialized
