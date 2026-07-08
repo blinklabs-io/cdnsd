@@ -331,7 +331,10 @@ func stateIsLoaded() bool {
 				loaded = false
 			}
 		}()
-		_, _ = s.LookupRecords([]string{"A"}, "test")
+		_, err := s.LookupRecords([]string{"A"}, "test")
+		if err != nil {
+			loaded = false
+		}
 	}()
 	return loaded
 }

@@ -371,8 +371,11 @@ func stateAvailable() bool {
 				available = false
 			}
 		}()
-		_, _ = state.GetState().
+		_, err := state.GetState().
 			LookupRecords([]string{"A"}, "__probe__")
+		if err != nil {
+			available = false
+		}
 	}()
 	return available
 }
