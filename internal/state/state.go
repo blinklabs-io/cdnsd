@@ -40,6 +40,9 @@ const (
 // ErrStateNotLoaded is returned when an operation needs a loaded state database.
 var ErrStateNotLoaded = errors.New("state database is not loaded")
 
+// ErrStateAlreadyLoaded is returned when loading an already loaded state database.
+var ErrStateAlreadyLoaded = errors.New("state database is already loaded")
+
 type State struct {
 	mu      sync.RWMutex
 	db      *badger.DB
@@ -64,6 +67,12 @@ type DiscoveredAddress struct {
 var globalState = &State{}
 
 func (s *State) Load() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db != nil {
+		return ErrStateAlreadyLoaded
+	}
+
 	cfg := config.GetConfig()
 	badgerOpts := badger.DefaultOptions(cfg.State.Directory).
 		WithLogger(NewBadgerLogger()).
@@ -82,18 +91,10 @@ func (s *State) Load() error {
 	gcTimer := time.NewTicker(5 * time.Minute)
 	gcStop := make(chan struct{})
 	gcDone := make(chan struct{})
-	s.mu.Lock()
-	if s.db != nil {
-		s.mu.Unlock()
-		gcTimer.Stop()
-		_ = db.Close()
-		return errors.New("state database is already loaded")
-	}
 	s.db = db
 	s.gcTimer = gcTimer
 	s.gcStop = gcStop
 	s.gcDone = gcDone
-	s.mu.Unlock()
 	go runGC(db, gcTimer, gcStop, gcDone)
 	return nil
 }

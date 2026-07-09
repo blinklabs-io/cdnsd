@@ -101,6 +101,25 @@ func TestCloseStopsTickerAndClosesBadger(t *testing.T) {
 	}
 }
 
+func TestLoadReturnsAlreadyLoadedForLoadedState(t *testing.T) {
+	s := newLoadedTestState(t)
+	if err := s.UpdateCursor(11, "block-hash"); err != nil {
+		t.Fatalf("failed to update cursor: %v", err)
+	}
+
+	if err := s.Load(); !errors.Is(err, ErrStateAlreadyLoaded) {
+		t.Fatalf("expected ErrStateAlreadyLoaded, got %v", err)
+	}
+
+	slot, hash, err := s.GetCursor()
+	if err != nil {
+		t.Fatalf("failed to get cursor after second load: %v", err)
+	}
+	if slot != 11 || hash != "block-hash" {
+		t.Fatalf("unexpected cursor after second load: slot=%d hash=%q", slot, hash)
+	}
+}
+
 func TestGetCursorReturnsErrorForMalformedPersistedValues(t *testing.T) {
 	tests := []struct {
 		name  string
