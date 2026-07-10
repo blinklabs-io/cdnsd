@@ -37,12 +37,18 @@ const (
 	handshakeRecordKeyPrefix   = "hs_r_"
 )
 
+// ErrStateNotLoaded is returned when an operation needs a loaded state database.
+var ErrStateNotLoaded = errors.New("state database is not loaded")
+
+// ErrStateAlreadyLoaded is returned when loading an already loaded state database.
+var ErrStateAlreadyLoaded = errors.New("state database is already loaded")
+
 type State struct {
-	db       *badger.DB
-	gcTimer  *time.Ticker
-	gcStopCh chan struct{}
-	gcDoneCh chan struct{}
-	mu       sync.Mutex
+	mu      sync.RWMutex
+	db      *badger.DB
+	gcTimer *time.Ticker
+	gcStop  chan struct{}
+	gcDone  chan struct{}
 }
 
 type DomainRecord struct {
@@ -61,6 +67,12 @@ type DiscoveredAddress struct {
 var globalState = &State{}
 
 func (s *State) Load() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db != nil {
+		return ErrStateAlreadyLoaded
+	}
+
 	cfg := config.GetConfig()
 	badgerOpts := badger.DefaultOptions(cfg.State.Directory).
 		WithLogger(NewBadgerLogger()).
@@ -70,61 +82,122 @@ func (s *State) Load() error {
 	if err != nil {
 		return err
 	}
-	s.mu.Lock()
-	s.db = db
-	s.mu.Unlock()
 	// Make sure existing DB matches current config options
-	if err := s.compareFingerprint(); err != nil {
-		_ = s.Close()
+	if err := compareFingerprint(db); err != nil {
+		_ = db.Close()
 		return err
 	}
 	// Run GC periodically for Badger DB
 	gcTimer := time.NewTicker(5 * time.Minute)
-	gcStopCh := make(chan struct{})
-	gcDoneCh := make(chan struct{})
-	s.mu.Lock()
+	gcStop := make(chan struct{})
+	gcDone := make(chan struct{})
+	s.db = db
 	s.gcTimer = gcTimer
-	s.gcStopCh = gcStopCh
-	s.gcDoneCh = gcDoneCh
-	s.mu.Unlock()
-	go func(db *badger.DB) {
-		defer close(gcDoneCh)
-		for {
-			select {
-			case <-gcTimer.C:
-			case <-gcStopCh:
-				return
-			}
-		again:
-			slog.Debug("database: running GC")
-			err := db.RunValueLogGC(0.5)
-			if err != nil {
-				// Log any actual errors
-				if !errors.Is(err, badger.ErrNoRewrite) {
-					slog.Warn(
-						fmt.Sprintf(
-							"database: GC failure: %s",
-							err,
-						),
-					)
-				}
-			} else {
-				// Run it again if it just ran successfully
-				goto again
-			}
-		}
-	}(db)
+	s.gcStop = gcStop
+	s.gcDone = gcDone
+	go runGC(db, gcTimer, gcStop, gcDone)
 	return nil
 }
 
-func (s *State) compareFingerprint() error {
+func (s *State) Close() error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	db := s.db
+	gcTimer := s.gcTimer
+	gcStop := s.gcStop
+	gcDone := s.gcDone
+	s.db = nil
+	s.gcTimer = nil
+	s.gcStop = nil
+	s.gcDone = nil
+	if gcTimer != nil {
+		gcTimer.Stop()
+	}
+	if gcStop != nil {
+		close(gcStop)
+	}
+	s.mu.Unlock()
+	if gcDone != nil {
+		<-gcDone
+	}
+	if db == nil {
+		return nil
+	}
+	return db.Close()
+}
+
+func runGC(
+	db *badger.DB,
+	gcTimer *time.Ticker,
+	gcStop <-chan struct{},
+	gcDone chan<- struct{},
+) {
+	defer close(gcDone)
+	for {
+		select {
+		case <-gcStop:
+			return
+		case <-gcTimer.C:
+			for {
+				select {
+				case <-gcStop:
+					return
+				default:
+				}
+				slog.Debug("database: running GC")
+				err := db.RunValueLogGC(0.5)
+				if err != nil {
+					// Log any actual errors
+					if !errors.Is(err, badger.ErrNoRewrite) {
+						slog.Warn(
+							fmt.Sprintf(
+								"database: GC failure: %s",
+								err,
+							),
+						)
+					}
+					break
+				}
+				// Run it again if it just ran successfully
+			}
+		}
+	}
+}
+
+func (s *State) view(fn func(*badger.Txn) error) error {
+	if s == nil {
+		return ErrStateNotLoaded
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return ErrStateNotLoaded
+	}
+	return s.db.View(fn)
+}
+
+func (s *State) update(fn func(*badger.Txn) error) error {
+	if s == nil {
+		return ErrStateNotLoaded
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return ErrStateNotLoaded
+	}
+	return s.db.Update(fn)
+}
+
+func compareFingerprint(db *badger.DB) error {
 	cfg := config.GetConfig()
 	fingerprint := fmt.Sprintf(
 		"network=%s,network-magic=%d",
 		cfg.Indexer.Network,
 		cfg.Indexer.NetworkMagic,
 	)
-	err := s.db.Update(func(txn *badger.Txn) error {
+	err := db.Update(func(txn *badger.Txn) error {
 		item, err := txn.Get([]byte(fingerprintKey))
 		if err != nil {
 			if errors.Is(err, badger.ErrKeyNotFound) {
@@ -157,7 +230,7 @@ func (s *State) compareFingerprint() error {
 }
 
 func (s *State) UpdateCursor(slotNumber uint64, blockHash string) error {
-	err := s.db.Update(func(txn *badger.Txn) error {
+	err := s.update(func(txn *badger.Txn) error {
 		val := fmt.Sprintf("%d,%s", slotNumber, blockHash)
 		if err := txn.Set([]byte(chainsyncCursorKey), []byte(val)); err != nil {
 			return err
@@ -170,19 +243,18 @@ func (s *State) UpdateCursor(slotNumber uint64, blockHash string) error {
 func (s *State) GetCursor() (uint64, string, error) {
 	var slotNumber uint64
 	var blockHash string
-	err := s.db.View(func(txn *badger.Txn) error {
+	err := s.view(func(txn *badger.Txn) error {
 		item, err := txn.Get([]byte(chainsyncCursorKey))
 		if err != nil {
 			return err
 		}
 		err = item.Value(func(v []byte) error {
-			var err error
-			cursorParts := strings.Split(string(v), ",")
-			slotNumber, err = strconv.ParseUint(cursorParts[0], 10, 64)
+			tmpSlotNumber, tmpBlockHash, err := parseCursorValue(v)
 			if err != nil {
 				return err
 			}
-			blockHash = cursorParts[1]
+			slotNumber = tmpSlotNumber
+			blockHash = tmpBlockHash
 			return nil
 		})
 		if err != nil {
@@ -196,17 +268,53 @@ func (s *State) GetCursor() (uint64, string, error) {
 	return slotNumber, blockHash, err
 }
 
+func parseCursorValue(v []byte) (uint64, string, error) {
+	value := string(v)
+	cursorParts := strings.Split(value, ",")
+	if len(cursorParts) != 2 {
+		return 0, "", fmt.Errorf(
+			"malformed persisted chainsync cursor %q: expected slot,block_hash",
+			value,
+		)
+	}
+	if cursorParts[0] == "" {
+		return 0, "", fmt.Errorf(
+			"malformed persisted chainsync cursor %q: missing slot",
+			value,
+		)
+	}
+	slotNumber, err := strconv.ParseUint(cursorParts[0], 10, 64)
+	if err != nil {
+		return 0, "", fmt.Errorf(
+			"malformed persisted chainsync cursor %q: invalid slot %q: %w",
+			value,
+			cursorParts[0],
+			err,
+		)
+	}
+	if cursorParts[1] == "" {
+		return 0, "", fmt.Errorf(
+			"malformed persisted chainsync cursor %q: missing block hash",
+			value,
+		)
+	}
+	return slotNumber, cursorParts[1], nil
+}
+
 func (s *State) AddDiscoveredAddress(addr DiscoveredAddress) error {
-	tmpAddrs, err := s.GetDiscoveredAddresses()
-	if err != nil {
-		return err
-	}
-	tmpAddrs = append(tmpAddrs, addr)
-	tmpAddrsJson, err := json.Marshal(&tmpAddrs)
-	if err != nil {
-		return err
-	}
-	err = s.db.Update(func(txn *badger.Txn) error {
+	err := s.update(func(txn *badger.Txn) error {
+		tmpAddrs, err := getDiscoveredAddresses(txn)
+		if err != nil {
+			return err
+		}
+		tmpAddrs, changed := dedupeDiscoveredAddresses(tmpAddrs, addr)
+		if !changed {
+			return nil
+		}
+		tmpAddrsJson, err := json.Marshal(&tmpAddrs)
+		if err != nil {
+			return err
+		}
 		return txn.Set(
 			[]byte(discoveredAddrKey),
 			tmpAddrsJson,
@@ -220,25 +328,68 @@ func (s *State) AddDiscoveredAddress(addr DiscoveredAddress) error {
 
 func (s *State) GetDiscoveredAddresses() ([]DiscoveredAddress, error) {
 	var ret []DiscoveredAddress
-	err := s.db.View(func(txn *badger.Txn) error {
-		item, err := txn.Get([]byte(discoveredAddrKey))
+	err := s.view(func(txn *badger.Txn) error {
+		tmpAddrs, err := getDiscoveredAddresses(txn)
 		if err != nil {
 			return err
 		}
-		err = item.Value(func(v []byte) error {
-			return json.Unmarshal(v, &ret)
-		})
-		if err != nil {
-			return err
-		}
+		ret = tmpAddrs
 		return nil
 	})
+	return ret, err
+}
+
+func getDiscoveredAddresses(txn *badger.Txn) ([]DiscoveredAddress, error) {
+	var ret []DiscoveredAddress
+	item, err := txn.Get([]byte(discoveredAddrKey))
 	if err != nil {
-		if !errors.Is(err, badger.ErrKeyNotFound) {
-			return ret, err
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return nil, nil
 		}
+		return nil, err
+	}
+	err = item.Value(func(v []byte) error {
+		return json.Unmarshal(v, &ret)
+	})
+	if err != nil {
+		return nil, err
 	}
 	return ret, nil
+}
+
+func dedupeDiscoveredAddresses(
+	addrs []DiscoveredAddress,
+	next DiscoveredAddress,
+) ([]DiscoveredAddress, bool) {
+	seen := make(map[string]struct{}, len(addrs)+1)
+	ret := make([]DiscoveredAddress, 0, len(addrs)+1)
+	nextKey := discoveredAddressDedupeKey(next)
+	foundNext := false
+	changed := false
+	for _, addr := range addrs {
+		key := discoveredAddressDedupeKey(addr)
+		if _, ok := seen[key]; ok {
+			changed = true
+			continue
+		}
+		seen[key] = struct{}{}
+		ret = append(ret, addr)
+		if key == nextKey {
+			foundNext = true
+		}
+	}
+	if !foundNext {
+		ret = append(ret, next)
+		changed = true
+	}
+	return ret, changed
+}
+
+func discoveredAddressDedupeKey(addr DiscoveredAddress) string {
+	return strings.Join(
+		[]string{addr.Address, addr.PolicyId, addr.TldName},
+		"\x00",
+	)
 }
 
 func (s *State) UpdateDomain(
@@ -259,7 +410,7 @@ func (s *State) updateDomain(
 	domainKeyPrefix string,
 	recordKeyPrefix string,
 ) error {
-	err := s.db.Update(func(txn *badger.Txn) error {
+	err := s.update(func(txn *badger.Txn) error {
 		// Add new records
 		recordKeys := make([]string, 0)
 		for recordIdx, record := range records {
@@ -347,7 +498,7 @@ func (s *State) lookupRecords(
 ) ([]DomainRecord, error) {
 	ret := []DomainRecord{}
 	recordName = strings.Trim(recordName, `.`)
-	err := s.db.View(func(txn *badger.Txn) error {
+	err := s.view(func(txn *badger.Txn) error {
 		for _, recordType := range recordTypes {
 			keyPrefix := fmt.Appendf(
 				nil,
@@ -392,7 +543,7 @@ func (s *State) lookupRecords(
 }
 
 func (s *State) UpdateHandshakeCursor(blockHash string) error {
-	err := s.db.Update(func(txn *badger.Txn) error {
+	err := s.update(func(txn *badger.Txn) error {
 		if err := txn.Set([]byte(handshakeCursorKey), []byte(blockHash)); err != nil {
 			return err
 		}
@@ -403,7 +554,7 @@ func (s *State) UpdateHandshakeCursor(blockHash string) error {
 
 func (s *State) GetHandshakeCursor() (string, error) {
 	var blockHash string
-	err := s.db.View(func(txn *badger.Txn) error {
+	err := s.view(func(txn *badger.Txn) error {
 		item, err := txn.Get([]byte(handshakeCursorKey))
 		if err != nil {
 			return err
@@ -424,7 +575,7 @@ func (s *State) GetHandshakeCursor() (string, error) {
 func (s *State) AddHandshakeName(name string) error {
 	nameHash := sha3.Sum256([]byte(name))
 	nameHashKey := fmt.Sprintf("%s%x", handshakeNameHashKeyPrefix, nameHash)
-	err := s.db.Update(func(txn *badger.Txn) error {
+	err := s.update(func(txn *badger.Txn) error {
 		return txn.Set(
 			[]byte(nameHashKey),
 			[]byte(name),
@@ -439,7 +590,7 @@ func (s *State) AddHandshakeName(name string) error {
 func (s *State) GetHandshakeNameByHash(nameHash []byte) (string, error) {
 	var ret string
 	nameHashKey := fmt.Sprintf("%s%x", handshakeNameHashKeyPrefix, nameHash)
-	err := s.db.View(func(txn *badger.Txn) error {
+	err := s.view(func(txn *badger.Txn) error {
 		item, err := txn.Get([]byte(nameHashKey))
 		if err != nil {
 			return err
@@ -482,34 +633,6 @@ func (s *State) LookupHandshakeRecords(
 
 func GetState() *State {
 	return globalState
-}
-
-// Close stops background state maintenance and closes the Badger database.
-func (s *State) Close() error {
-	s.mu.Lock()
-	db := s.db
-	gcTimer := s.gcTimer
-	gcStopCh := s.gcStopCh
-	gcDoneCh := s.gcDoneCh
-	s.db = nil
-	s.gcTimer = nil
-	s.gcStopCh = nil
-	s.gcDoneCh = nil
-	if gcTimer != nil {
-		gcTimer.Stop()
-	}
-	if gcStopCh != nil {
-		close(gcStopCh)
-	}
-	s.mu.Unlock()
-
-	if gcDoneCh != nil {
-		<-gcDoneCh
-	}
-	if db == nil {
-		return nil
-	}
-	return db.Close()
 }
 
 // BadgerLogger is a wrapper type to give our logger the expected interface
