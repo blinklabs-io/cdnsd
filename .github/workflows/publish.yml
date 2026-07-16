@@ -84,7 +84,14 @@ jobs:
           subject-path: 'cdnsd'
 
   build-images:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     needs: [create-draft-release]
     permissions:
       actions: write
@@ -99,8 +106,6 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0 https://github.com/actions/checkout/releases/tag/v7.0.0
         with:
           fetch-depth: '0'
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0 https://github.com/docker/setup-qemu-action/releases/tag/v4.2.0
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0 https://github.com/docker/setup-buildx-action/releases/tag/v4.2.0
       - name: Login to Docker Hub
@@ -127,25 +132,85 @@ jobs:
             type=ref,event=branch
             # semver
             type=semver,pattern={{version}}
+          flavor: |
+            suffix=-${{ matrix.arch }},onlatest=true
       - name: Build images
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0 https://github.com/docker/build-push-action/releases/tag/v7.3.0
         id: push
         with:
           outputs: "type=registry,push=true"
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/${{ matrix.arch }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  create-image-manifests:
+    runs-on: ubuntu-latest
+    needs: [build-images]
+    permissions:
+      actions: write
+      attestations: write
+      checks: write
+      contents: write
+      id-token: write
+      packages: write
+      statuses: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0 https://github.com/actions/checkout/releases/tag/v7.0.0
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0 https://github.com/docker/setup-buildx-action/releases/tag/v4.2.0
+      - name: Login to Docker Hub
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0 https://github.com/docker/login-action/releases/tag/v4.4.0
+        with:
+          username: blinklabs
+          password: ${{ secrets.DOCKER_PASSWORD }} # uses token
+      - name: Login to GHCR
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0 https://github.com/docker/login-action/releases/tag/v4.4.0
+        with:
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          registry: ghcr.io
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0 https://github.com/docker/metadata-action/releases/tag/v6.2.0
+        with:
+          images: |
+            blinklabs/cdnsd
+            ghcr.io/${{ github.repository }}
+          tags: |
+            # Only version, no revision
+            type=match,pattern=v(.*)-(.*),group=1
+            # branch
+            type=ref,event=branch
+            # semver
+            type=semver,pattern={{version}}
+      - name: Create multi-architecture manifests
+        env:
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          while IFS= read -r tag; do
+            docker buildx imagetools create \
+              --tag "${tag}" \
+              "${tag}-amd64" \
+              "${tag}-arm64"
+          done <<< "${IMAGE_TAGS}"
+      - name: Get image digests
+        id: digest
+        env:
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          dockerhub_tag="$(echo "${IMAGE_TAGS}" | grep -v '^ghcr' | head -1)"
+          ghcr_tag="$(echo "${IMAGE_TAGS}" | grep '^ghcr' | head -1)"
+          echo "dockerhub_digest=$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "${dockerhub_tag}")" >> "${GITHUB_OUTPUT}"
+          echo "ghcr_digest=$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "${ghcr_tag}")" >> "${GITHUB_OUTPUT}"
       - name: Attest Docker Hub image
         uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1 https://github.com/actions/attest/releases/tag/v4.1.1
         with:
           subject-name: index.docker.io/blinklabs/cdnsd
-          subject-digest: ${{ steps.push.outputs.digest }}
+          subject-digest: ${{ steps.digest.outputs.dockerhub_digest }}
           push-to-registry: true
       - name: Attest GHCR image
         uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1 https://github.com/actions/attest/releases/tag/v4.1.1
         with:
           subject-name: ghcr.io/${{ github.repository }}
-          subject-digest: ${{ steps.push.outputs.digest }}
+          subject-digest: ${{ steps.digest.outputs.ghcr_digest }}
           push-to-registry: true
       # Update Docker Hub from README
       - name: Docker Hub Description
@@ -161,7 +226,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    needs: [create-draft-release, build-binaries, build-images]
+    needs: [create-draft-release, build-binaries, create-image-manifests]
     steps:
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0 https://github.com/actions/github-script/releases/tag/v9.0.0
         if: startsWith(github.ref, 'refs/tags/')
