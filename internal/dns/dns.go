@@ -41,13 +41,20 @@ var metricQueryTotal = promauto.NewCounter(prometheus.CounterOpts{
 // Resolver handles DNS queries using configured root hints for
 // recursive resolution.
 type Resolver struct {
-	rootHints map[uint16]map[string][]dns.RR
+	rootHints     map[uint16]map[string][]dns.RR
+	dnssecEnabled bool
+	trustAnchors  map[string][]dns.RR
 }
 
 // NewResolver creates a resolver from the provided config.
 func NewResolver(cfg *config.Config) (*Resolver, error) {
-	resolver := &Resolver{}
+	resolver := &Resolver{
+		dnssecEnabled: cfg.Dns.DNSSEC.Enabled,
+	}
 	if err := resolver.loadRootHints(cfg); err != nil {
+		return nil, err
+	}
+	if err := resolver.loadTrustAnchors(cfg); err != nil {
 		return nil, err
 	}
 	return resolver, nil
@@ -56,16 +63,19 @@ func NewResolver(cfg *config.Config) (*Resolver, error) {
 // resolutionContext tracks state during recursive DNS resolution
 // to prevent infinite loops and limit recursion depth.
 type resolutionContext struct {
-	depth    int
-	maxDepth int
-	visited  map[string]bool
+	depth      int
+	maxDepth   int
+	visited    map[string]bool
+	validation *dnssecValidation
+	requestCtx context.Context
 }
 
 func newResolutionContext() *resolutionContext {
 	return &resolutionContext{
-		depth:    0,
-		maxDepth: 10,
-		visited:  make(map[string]bool),
+		depth:      0,
+		maxDepth:   10,
+		visited:    make(map[string]bool),
+		requestCtx: context.Background(),
 	}
 }
 
@@ -85,9 +95,11 @@ func (c *resolutionContext) descend() *resolutionContext {
 	newVisited := make(map[string]bool, len(c.visited))
 	maps.Copy(newVisited, c.visited)
 	return &resolutionContext{
-		depth:    c.depth + 1,
-		maxDepth: c.maxDepth,
-		visited:  newVisited,
+		depth:      c.depth + 1,
+		maxDepth:   c.maxDepth,
+		visited:    newVisited,
+		validation: c.validation,
+		requestCtx: c.requestCtx,
 	}
 }
 
@@ -150,6 +162,13 @@ func (r *Resolver) resolveNameserverAddress(
 
 	// Not found locally - resolve via upstream using root hints
 	childCtx := ctx.descend()
+	if r.dnssecEnabled {
+		validation, err := r.dnssecContextForZone(".", false)
+		if err != nil {
+			return nil, err
+		}
+		childCtx.validation = validation
+	}
 
 	// Build a DNS query for the nameserver's A record
 	msg := new(dns.Msg)
@@ -597,6 +616,7 @@ func (r *Resolver) handleQuery(w dns.ResponseWriter, req *dns.Msg) {
 		lookupRecordTypes = append(lookupRecordTypes, dns.TypeCNAME)
 	}
 	for _, lookupRecordType := range lookupRecordTypes {
+		fromHandshake := false
 		// Try Cardano
 		records, err := state.GetState().LookupRecords(
 			[]string{dns.Type(lookupRecordType).String()},
@@ -620,6 +640,7 @@ func (r *Resolver) handleQuery(w dns.ResponseWriter, req *dns.Msg) {
 				)
 				return
 			}
+			fromHandshake = records != nil
 		}
 		if records != nil {
 			// Assemble response
@@ -637,6 +658,27 @@ func (r *Resolver) handleQuery(w dns.ResponseWriter, req *dns.Msg) {
 					return
 				}
 				m.Answer = append(m.Answer, tmpRR)
+			}
+			if wantsDNSSEC(req) &&
+				req.Question[0].Qtype != dns.TypeRRSIG {
+				signatures, err := lookupLocalSignatures(
+					strings.TrimSuffix(
+						req.Question[0].Name,
+						".",
+					),
+					fromHandshake,
+					m.Answer,
+				)
+				if err != nil {
+					slog.Error(
+						fmt.Sprintf(
+							"failed to lookup DNSSEC signatures: %s",
+							err,
+						),
+					)
+					return
+				}
+				m.Answer = append(m.Answer, signatures...)
 			}
 			// Send response
 			if err := w.WriteMsg(m); err != nil {
@@ -656,9 +698,10 @@ func (r *Resolver) handleQuery(w dns.ResponseWriter, req *dns.Msg) {
 		if zone != "" {
 			m.SetReply(req)
 			m.Authoritative = true
+			soa := generateSyntheticSOA(zone)
 			m.Answer = append(
 				m.Answer,
-				generateSyntheticSOA(zone),
+				soa,
 			)
 			if err := w.WriteMsg(m); err != nil {
 				slog.Error(
@@ -685,11 +728,37 @@ func (r *Resolver) handleQuery(w dns.ResponseWriter, req *dns.Msg) {
 			),
 		)
 	}
-	if nameservers != nil {
+	if len(nameservers) > 0 {
 		// Assemble response
 		m.SetReply(req)
 		if cfg.Dns.RecursionEnabled {
 			ctx := newResolutionContext()
+			if r.dnssecEnabled && !req.CheckingDisabled {
+				validation, validationErr := r.dnssecContextForZone(
+					nameserverDomain,
+					nameserverDomain != ".",
+				)
+				if validationErr != nil {
+					m.SetRcode(req, dns.RcodeServerFailure)
+					if writeErr := w.WriteMsg(m); writeErr != nil {
+						slog.Error(
+							fmt.Sprintf(
+								"failed to write response: %s",
+								writeErr,
+							),
+						)
+					}
+					slog.Error(
+						"failed to load DNSSEC trust anchors",
+						"zone",
+						nameserverDomain,
+						"error",
+						validationErr,
+					)
+					return
+				}
+				ctx.validation = validation
+			}
 
 			// Try all nameservers with retry and failover
 			resp, err := r.queryMultipleNameservers(
@@ -773,7 +842,52 @@ func (r *Resolver) handleQuery(w dns.ResponseWriter, req *dns.Msg) {
 	// Include SOA in authority section for blockchain zones
 	zone := findZoneForName(req.Question[0].Name)
 	if zone != "" {
-		m.Ns = append(m.Ns, generateSyntheticSOA(zone))
+		m.Authoritative = true
+		fromHandshake, sourceErr := localZoneUsesHandshake(zone)
+		if sourceErr != nil {
+			slog.Error(
+				"failed to determine local zone source",
+				"zone",
+				zone,
+				"error",
+				sourceErr,
+			)
+			return
+		}
+		soa, storedSOA, soaErr := lookupLocalSOA(zone, fromHandshake)
+		if soaErr != nil {
+			slog.Error(
+				"failed to lookup local SOA",
+				"zone",
+				zone,
+				"error",
+				soaErr,
+			)
+			return
+		}
+		m.Ns = append(m.Ns, soa)
+		if wantsDNSSEC(req) && storedSOA {
+			rcode, proof, err := lookupLocalNegativeProof(
+				req.Question[0],
+				zone,
+				soa,
+				fromHandshake,
+			)
+			if err != nil {
+				slog.Error(
+					"failed to lookup local DNSSEC denial proof",
+					"zone",
+					zone,
+					"error",
+					err,
+				)
+				return
+			}
+			if len(proof) > 0 {
+				m.Rcode = rcode
+				m.Ns = append(m.Ns, proof...)
+			}
+		}
 	}
 	if err := w.WriteMsg(m); err != nil {
 		slog.Error(
@@ -810,6 +924,212 @@ func stateRecordToDnsRR(record state.DomainRecord) (dns.RR, error) {
 	return dns.NewRR(tmpRR)
 }
 
+func lookupLocalSignatures(
+	recordName string,
+	fromHandshake bool,
+	answer []dns.RR,
+) ([]dns.RR, error) {
+	var (
+		records []state.DomainRecord
+		err     error
+	)
+	if fromHandshake {
+		records, err = state.GetState().LookupHandshakeRecords(
+			[]string{"RRSIG"},
+			recordName,
+		)
+	} else {
+		records, err = state.GetState().LookupRecords(
+			[]string{"RRSIG"},
+			recordName,
+		)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	answerTypes := make(map[uint16]struct{}, len(answer))
+	for _, rr := range answer {
+		answerTypes[rr.Header().Rrtype] = struct{}{}
+	}
+	var ret []dns.RR
+	for _, record := range records {
+		rr, err := stateRecordToDnsRR(record)
+		if err != nil {
+			return nil, err
+		}
+		sig, ok := rr.(*dns.RRSIG)
+		if !ok {
+			continue
+		}
+		if _, ok := answerTypes[sig.TypeCovered]; ok {
+			ret = append(ret, sig)
+		}
+	}
+	return ret, nil
+}
+
+func lookupLocalZoneDNSSECRecords(
+	zone string,
+	fromHandshake bool,
+) ([]dns.RR, error) {
+	recordTypes := []string{"NSEC", "NSEC3", "RRSIG"}
+	var (
+		records []state.DomainRecord
+		err     error
+	)
+	if fromHandshake {
+		records, err = state.GetState().LookupHandshakeRecordsInZone(
+			recordTypes,
+			zone,
+		)
+	} else {
+		records, err = state.GetState().LookupRecordsInZone(
+			recordTypes,
+			zone,
+		)
+	}
+	if err != nil {
+		return nil, err
+	}
+	ret := make([]dns.RR, 0, len(records))
+	for _, record := range records {
+		rr, err := stateRecordToDnsRR(record)
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, rr)
+	}
+	return ret, nil
+}
+
+func localZoneUsesHandshake(zone string) (bool, error) {
+	recordName := strings.TrimSuffix(canonicalDNSName(zone), ".")
+	cardanoNS, err := state.GetState().LookupRecords(
+		[]string{"NS"},
+		recordName,
+	)
+	if err != nil {
+		return false, err
+	}
+	if len(cardanoNS) > 0 {
+		return false, nil
+	}
+	handshakeNS, err := state.GetState().LookupHandshakeRecords(
+		[]string{"NS"},
+		recordName,
+	)
+	if err != nil {
+		return false, err
+	}
+	return len(handshakeNS) > 0, nil
+}
+
+func lookupLocalSOA(
+	zone string,
+	fromHandshake bool,
+) (*dns.SOA, bool, error) {
+	recordName := strings.TrimSuffix(canonicalDNSName(zone), ".")
+	var (
+		records []state.DomainRecord
+		err     error
+	)
+	if fromHandshake {
+		records, err = state.GetState().LookupHandshakeRecords(
+			[]string{"SOA"},
+			recordName,
+		)
+	} else {
+		records, err = state.GetState().LookupRecords(
+			[]string{"SOA"},
+			recordName,
+		)
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if len(records) == 0 {
+		return generateSyntheticSOA(zone), false, nil
+	}
+	if len(records) != 1 {
+		return nil, false, fmt.Errorf(
+			"zone %s has %d SOA records, want exactly one",
+			zone,
+			len(records),
+		)
+	}
+	rr, err := stateRecordToDnsRR(records[0])
+	if err != nil {
+		return nil, false, err
+	}
+	soa, ok := rr.(*dns.SOA)
+	if !ok {
+		return nil, false, fmt.Errorf(
+			"stored SOA record for %s parsed as %T",
+			zone,
+			rr,
+		)
+	}
+	return soa, true, nil
+}
+
+func lookupLocalNegativeProof(
+	question dns.Question,
+	zone string,
+	soa *dns.SOA,
+	fromHandshake bool,
+) (int, []dns.RR, error) {
+	records, err := lookupLocalZoneDNSSECRecords(zone, fromHandshake)
+	if err != nil {
+		return 0, nil, err
+	}
+	soaSignatures := signaturesFor(records, soa.Hdr.Name, dns.TypeSOA)
+	if len(soaSignatures) == 0 {
+		return 0, nil, nil
+	}
+
+	qname := canonicalDNSName(question.Name)
+	rcode := dns.RcodeSuccess
+	proof := nodataProofRecords(qname, question.Qtype, records)
+	if len(proof) == 0 {
+		rcode = dns.RcodeNameError
+		proof = nxdomainProofRecords(qname, records)
+	}
+	if len(proof) == 0 {
+		return 0, nil, nil
+	}
+
+	ret := make([]dns.RR, 0, len(proof)*2+len(soaSignatures))
+	for _, signature := range soaSignatures {
+		ret = append(ret, signature)
+	}
+	type rrsetKey struct {
+		name   string
+		rrType uint16
+	}
+	seen := make(map[rrsetKey]struct{}, len(proof))
+	for _, rr := range proof {
+		key := rrsetKey{
+			name:   canonicalDNSName(rr.Header().Name),
+			rrType: rr.Header().Rrtype,
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		rrset := rrsetFrom(records, key.name, key.rrType)
+		signatures := signaturesFor(records, key.name, key.rrType)
+		if len(rrset) == 0 || len(signatures) == 0 {
+			return 0, nil, nil
+		}
+		seen[key] = struct{}{}
+		ret = append(ret, rrset...)
+		for _, signature := range signatures {
+			ret = append(ret, signature)
+		}
+	}
+	return rcode, ret, nil
+}
+
 func copyResponse(req *dns.Msg, srcResp *dns.Msg, destResp *dns.Msg) {
 	if srcResp == nil {
 		return
@@ -818,6 +1138,8 @@ func copyResponse(req *dns.Msg, srcResp *dns.Msg, destResp *dns.Msg) {
 	destResp.SetRcode(req, srcResp.Rcode)
 	destResp.RecursionDesired = req.RecursionDesired
 	destResp.RecursionAvailable = srcResp.RecursionAvailable
+	destResp.AuthenticatedData = srcResp.AuthenticatedData &&
+		(wantsDNSSEC(req) || req.AuthenticatedData)
 	if srcResp.Ns != nil {
 		destResp.Ns = append(destResp.Ns, srcResp.Ns...)
 	}
@@ -826,6 +1148,21 @@ func copyResponse(req *dns.Msg, srcResp *dns.Msg, destResp *dns.Msg) {
 	}
 	if srcResp.Extra != nil {
 		destResp.Extra = append(destResp.Extra, srcResp.Extra...)
+	}
+	if !wantsDNSSEC(req) {
+		requestedType := req.Question[0].Qtype
+		destResp.Answer = filterDNSSECRecords(
+			destResp.Answer,
+			requestedType,
+		)
+		destResp.Ns = filterDNSSECRecords(
+			destResp.Ns,
+			requestedType,
+		)
+		destResp.Extra = filterDNSSECRecords(
+			destResp.Extra,
+			requestedType,
+		)
 	}
 }
 
@@ -946,13 +1283,34 @@ func (r *Resolver) queryMultipleNameserversWithPort(
 	}
 
 	for _, addr := range addresses {
-		client := &dns.Client{
-			Timeout: timeout,
+		if r.dnssecEnabled && !msg.CheckingDisabled {
+			if err := r.ensureDNSSECKeys(
+				ctx.requestCtx,
+				ctx.validation,
+				addr,
+				timeout,
+			); err != nil {
+				slog.Debug(
+					"DNSSEC key authentication failed",
+					"address",
+					addr,
+					"error",
+					err,
+				)
+				lastErr = err
+				continue
+			}
 		}
 		queryFn := func() (*dns.Msg, error) {
-			resp, _, exchangeErr := client.Exchange(
-				msg,
+			outbound := msg
+			if r.dnssecEnabled || wantsDNSSEC(msg) {
+				outbound = dnssecQuery(msg)
+			}
+			resp, exchangeErr := exchangeDNS(
+				ctx.requestCtx,
+				outbound,
 				addr,
+				timeout,
 			)
 			if exchangeErr != nil {
 				return nil, exchangeErr
@@ -995,7 +1353,7 @@ func (r *Resolver) queryMultipleNameserversWithPort(
 		// If recursive and got a referral, follow it
 		if recursive &&
 			!resp.Authoritative &&
-			len(resp.Ns) > 0 {
+			len(getNameserversFromResponse(resp)) > 0 {
 			result, referralErr := r.handleReferral(
 				msg,
 				resp,
@@ -1015,6 +1373,27 @@ func (r *Resolver) queryMultipleNameserversWithPort(
 			continue
 		}
 
+		if r.dnssecEnabled && !msg.CheckingDisabled {
+			authenticated, validationErr := r.validateFinalResponse(
+				msg,
+				resp,
+				ctx.validation,
+			)
+			if validationErr != nil {
+				slog.Debug(
+					"DNSSEC response validation failed",
+					"address",
+					addr,
+					"error",
+					validationErr,
+				)
+				lastErr = validationErr
+				continue
+			}
+			resp.AuthenticatedData = authenticated
+		} else {
+			resp.AuthenticatedData = false
+		}
 		return resp, nil
 	}
 
@@ -1056,8 +1435,20 @@ func (r *Resolver) handleReferral(
 		return resp, nil
 	}
 
-	// Resolve missing glue records
 	childCtx := ctx.descend()
+	if r.dnssecEnabled && !msg.CheckingDisabled {
+		validation, err := r.validationForReferral(
+			resp,
+			ctx.validation,
+			msg.Question[0].Name,
+		)
+		if err != nil {
+			return nil, err
+		}
+		childCtx.validation = validation
+	}
+
+	// Resolve missing glue records
 	for nsName, nsIPs := range nameservers {
 		if len(nsIPs) == 0 {
 			resolvedIPs, err := r.resolveNameserverAddress(
@@ -1280,10 +1671,19 @@ func getNameserversFromResponse(msg *dns.Msg) map[string][]net.IP {
 		// TODO: handle SOA
 		switch v := ns.(type) {
 		case *dns.NS:
-			nsName := v.Ns
+			nsName := canonicalDNSName(v.Ns)
 			ret[nsName] = []net.IP{}
+			// Glue is only authoritative when the nameserver is
+			// beneath the delegated zone. Out-of-bailiwick address
+			// records must be resolved independently.
+			if !dns.IsSubDomain(
+				canonicalDNSName(v.Hdr.Name),
+				nsName,
+			) {
+				continue
+			}
 			for _, extra := range msg.Extra {
-				if extra.Header().Name != nsName {
+				if canonicalDNSName(extra.Header().Name) != nsName {
 					continue
 				}
 				switch v := extra.(type) {

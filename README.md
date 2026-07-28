@@ -11,6 +11,9 @@ Resolver for Cardano-based second-level domains on Handshake top-level domains
 - **Multi-protocol DNS service:**
   - Standard DNS over UDP and TCP
   - DNS over TLS (when enabled)
+- **DNSSEC-aware recursive resolution:**
+  - Validates signed answers and authenticated denial of existence
+  - Supports IANA and blockchain-authenticated roots
 - **Real-time monitoring:**
   - Prometheus metrics endpoint
   - Optional request-level query logging
@@ -40,6 +43,9 @@ Resolver for Cardano-based second-level domains on Handshake top-level domains
 | `dns.recursionEnabled`  | bool         | `DNS_RECURSION`                   | Allow recursive DNS lookups |
 | `dns.rootHints`         | string       | `DNS_ROOT_HINTS`                  | DNS root hints (PEM string) |
 | `dns.rootHintsFile`     | string       | `DNS_ROOT_HINTS_FILE`             | File path to DNS root hints |
+| `dns.dnssec.enabled`    | bool         | `DNSSEC_ENABLED`                  | Validate recursive DNSSEC chains (default: false) |
+| `dns.dnssec.trustAnchors` | string     | `DNSSEC_TRUST_ANCHORS`            | DS or DNSKEY trust anchors in zone-file format |
+| `dns.dnssec.trustAnchorsFile` | string | `DNSSEC_TRUST_ANCHORS_FILE`       | File containing DS or DNSKEY trust anchors |
 | `debug.address`         | string       | `DEBUG_ADDRESS`                   | Address for debug HTTP server (default: localhost) |
 | `debug.port`            | uint         | `DEBUG_PORT`                      | Port for debug HTTP server |
 | `indexer.network`       | string       | `INDEXER_NETWORK`                 | Cardano network name (e.g. preprod, mainnet) |
@@ -68,8 +74,12 @@ dns:
   address: "0.0.0.0"
   port: 8053
   tlsPort: 8853
-  recursionEnabled: false
+  recursionEnabled: true
   rootHintsFile: "/etc/cdnsd/named.root"
+  dnssec:
+    enabled: true
+    # Optional: replaces the bundled IANA root anchors.
+    trustAnchorsFile: "/etc/cdnsd/root.keys"
 debug:
   address: "127.0.0.1"
   port: 6060
@@ -90,6 +100,24 @@ tls:
 profiles:
   - "cardano-preprod-testing"
 ```
+
+### DNSSEC and multiple roots
+
+DNSSEC validation is opt-in. When enabled, cdnsd requests DNSSEC records
+from authoritative servers, validates each signed delegation, returns the
+Authenticated Data (`AD`) bit for secure answers, and returns `SERVFAIL`
+for bogus data. Securely proven unsigned delegations continue to resolve
+without the `AD` bit.
+
+The bundled trust-anchor set contains the IANA KSK-2017 and KSK-2024
+anchors. Supplying `trustAnchors` or `trustAnchorsFile` replaces that set.
+Each non-comment line must be a complete `DS` or `DNSKEY` record, and
+anchors for multiple zones may be listed together.
+
+Cardano and Handshake records do not need to descend from the ICANN root.
+When an on-chain delegation contains a `DS` record, cdnsd uses that record
+as the trust anchor for the delegated zone. This creates a separate,
+blockchain-authenticated DNSSEC island for each applicable root.
 
 ### Profiles
 
