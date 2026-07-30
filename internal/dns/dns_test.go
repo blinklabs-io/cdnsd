@@ -666,6 +666,12 @@ func TestThirdPartyDNSDelegation(t *testing.T) {
 				t.Fatalf("unexpected resolver error: %v", err)
 			}
 			ctx := newResolutionContext()
+			queryCtx, cancel := context.WithTimeout(
+				ctx.requestCtx,
+				10*time.Second,
+			)
+			defer cancel()
+			ctx.requestCtx = queryCtx
 			msg := new(dns.Msg)
 			msg.SetQuestion(tc.domain, dns.TypeA)
 
@@ -688,6 +694,55 @@ func TestThirdPartyDNSDelegation(t *testing.T) {
 				t.Log("warning: no answer records returned")
 			}
 		})
+	}
+}
+
+func TestGetNameserversAcceptsOnlyInBailiwickGlue(t *testing.T) {
+	msg := new(dns.Msg)
+	msg.Ns = []dns.RR{
+		&dns.NS{
+			Hdr: dns.RR_Header{
+				Name:   "example.",
+				Rrtype: dns.TypeNS,
+				Class:  dns.ClassINET,
+			},
+			Ns: "NS.EXAMPLE.",
+		},
+		&dns.NS{
+			Hdr: dns.RR_Header{
+				Name:   "example.",
+				Rrtype: dns.TypeNS,
+				Class:  dns.ClassINET,
+			},
+			Ns: "ns.external.",
+		},
+	}
+	msg.Extra = []dns.RR{
+		&dns.A{
+			Hdr: dns.RR_Header{
+				Name:   "ns.example.",
+				Rrtype: dns.TypeA,
+				Class:  dns.ClassINET,
+			},
+			A: net.ParseIP("192.0.2.1"),
+		},
+		&dns.A{
+			Hdr: dns.RR_Header{
+				Name:   "ns.external.",
+				Rrtype: dns.TypeA,
+				Class:  dns.ClassINET,
+			},
+			A: net.ParseIP("192.0.2.2"),
+		},
+	}
+
+	got := getNameserversFromResponse(msg)
+	if len(got["ns.example."]) != 1 ||
+		!got["ns.example."][0].Equal(net.ParseIP("192.0.2.1")) {
+		t.Fatalf("in-bailiwick glue = %v, want 192.0.2.1", got)
+	}
+	if len(got["ns.external."]) != 0 {
+		t.Fatalf("accepted out-of-bailiwick glue: %v", got)
 	}
 }
 

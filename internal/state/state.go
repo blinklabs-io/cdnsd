@@ -491,6 +491,64 @@ func (s *State) LookupRecords(
 	)
 }
 
+func (s *State) LookupRecordsInZone(
+	recordTypes []string,
+	zone string,
+) ([]DomainRecord, error) {
+	return s.lookupRecordsInZone(
+		recordTypes,
+		zone,
+		cardanoRecordKeyPrefix,
+	)
+}
+
+func (s *State) lookupRecordsInZone(
+	recordTypes []string,
+	zone string,
+	recordKeyPrefix string,
+) ([]DomainRecord, error) {
+	var ret []DomainRecord
+	zone = strings.ToLower(strings.Trim(zone, "."))
+	err := s.view(func(txn *badger.Txn) error {
+		for _, recordType := range recordTypes {
+			keyPrefix := fmt.Appendf(
+				nil,
+				"%s%s_",
+				recordKeyPrefix,
+				strings.ToUpper(recordType),
+			)
+			it := txn.NewIterator(badger.DefaultIteratorOptions)
+			defer it.Close()
+			for it.Seek(keyPrefix); it.ValidForPrefix(keyPrefix); it.Next() {
+				item := it.Item()
+				val, err := item.ValueCopy(nil)
+				if err != nil {
+					return err
+				}
+				var record DomainRecord
+				if err := gob.NewDecoder(bytes.NewReader(val)).
+					Decode(&record); err != nil {
+					return err
+				}
+				name := strings.ToLower(strings.Trim(record.Lhs, "."))
+				if zone != "" && name != zone &&
+					!strings.HasSuffix(name, "."+zone) {
+					continue
+				}
+				ret = append(ret, record)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(ret) == 0 {
+		return nil, nil
+	}
+	return ret, nil
+}
+
 func (s *State) lookupRecords(
 	recordTypes []string,
 	recordName string,
@@ -627,6 +685,17 @@ func (s *State) LookupHandshakeRecords(
 	return s.lookupRecords(
 		recordTypes,
 		recordName,
+		handshakeRecordKeyPrefix,
+	)
+}
+
+func (s *State) LookupHandshakeRecordsInZone(
+	recordTypes []string,
+	zone string,
+) ([]DomainRecord, error) {
+	return s.lookupRecordsInZone(
+		recordTypes,
+		zone,
 		handshakeRecordKeyPrefix,
 	)
 }

@@ -33,16 +33,23 @@ type LoggingConfig struct {
 }
 
 type DnsConfig struct {
-	ListenAddress    string    `yaml:"address"          envconfig:"DNS_LISTEN_ADDRESS"`
-	ListenPort       uint      `yaml:"port"             envconfig:"DNS_LISTEN_PORT"`
-	ListenTlsPort    uint      `yaml:"tlsPort"          envconfig:"DNS_LISTEN_TLS_PORT"`
-	RecursionEnabled bool      `yaml:"recursionEnabled" envconfig:"DNS_RECURSION"`
-	RootHints        string    `yaml:"rootHints"        envconfig:"DNS_ROOT_HINTS"`
-	RootHintsFile    string    `yaml:"rootHintsFile"    envconfig:"DNS_ROOT_HINTS_FILE"`
-	RetryCount       int       `yaml:"retryCount"       envconfig:"DNS_RETRY_COUNT"`
-	RetryDelayMs     int       `yaml:"retryDelayMs"     envconfig:"DNS_RETRY_DELAY_MS"`
-	QueryTimeoutMs   int       `yaml:"queryTimeoutMs"   envconfig:"DNS_QUERY_TIMEOUT_MS"`
-	SOA              SOAConfig `yaml:"soa"`
+	ListenAddress    string       `yaml:"address"          envconfig:"DNS_LISTEN_ADDRESS"`
+	ListenPort       uint         `yaml:"port"             envconfig:"DNS_LISTEN_PORT"`
+	ListenTlsPort    uint         `yaml:"tlsPort"          envconfig:"DNS_LISTEN_TLS_PORT"`
+	RecursionEnabled bool         `yaml:"recursionEnabled" envconfig:"DNS_RECURSION"`
+	RootHints        string       `yaml:"rootHints"        envconfig:"DNS_ROOT_HINTS"`
+	RootHintsFile    string       `yaml:"rootHintsFile"    envconfig:"DNS_ROOT_HINTS_FILE"`
+	RetryCount       int          `yaml:"retryCount"       envconfig:"DNS_RETRY_COUNT"`
+	RetryDelayMs     int          `yaml:"retryDelayMs"     envconfig:"DNS_RETRY_DELAY_MS"`
+	QueryTimeoutMs   int          `yaml:"queryTimeoutMs"   envconfig:"DNS_QUERY_TIMEOUT_MS"`
+	DNSSEC           DNSSECConfig `yaml:"dnssec"`
+	SOA              SOAConfig    `yaml:"soa"`
+}
+
+type DNSSECConfig struct {
+	Enabled          bool   `yaml:"enabled"          envconfig:"DNSSEC_ENABLED"`
+	TrustAnchors     string `yaml:"trustAnchors"     envconfig:"DNSSEC_TRUST_ANCHORS"`
+	TrustAnchorsFile string `yaml:"trustAnchorsFile" envconfig:"DNSSEC_TRUST_ANCHORS_FILE"`
 }
 
 type DebugConfig struct {
@@ -87,6 +94,9 @@ type TlsConfig struct {
 //go:embed named.root
 var defaultRootHints []byte
 
+//go:embed root.keys
+var defaultTrustAnchors []byte
+
 // Singleton config instance with default values
 var globalConfig = &Config{
 	Logging: LoggingConfig{
@@ -100,6 +110,9 @@ var globalConfig = &Config{
 		RetryCount:     3,
 		RetryDelayMs:   100,
 		QueryTimeoutMs: 5000,
+		DNSSEC: DNSSECConfig{
+			TrustAnchors: string(defaultTrustAnchors),
+		},
 		SOA: SOAConfig{
 			Mname:   "ns1.cdnsd.localhost.",
 			Rname:   "hostmaster.cdnsd.localhost.",
@@ -211,6 +224,21 @@ func Load(configFile string) (*Config, error) {
 			return nil, err
 		}
 		globalConfig.Dns.RootHints = string(hintsContent)
+	}
+	// Load DNSSEC trust anchors. The file contains ordinary DS or
+	// DNSKEY records in zone-file presentation format.
+	if globalConfig.Dns.DNSSEC.TrustAnchorsFile != "" {
+		anchorsContent, err := os.ReadFile(
+			globalConfig.Dns.DNSSEC.TrustAnchorsFile,
+		)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"read DNSSEC trust anchors file %q: %w",
+				globalConfig.Dns.DNSSEC.TrustAnchorsFile,
+				err,
+			)
+		}
+		globalConfig.Dns.DNSSEC.TrustAnchors = string(anchorsContent)
 	}
 	return globalConfig, nil
 }
