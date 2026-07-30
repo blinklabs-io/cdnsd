@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/kelseyhightower/envconfig"
 	"gopkg.in/yaml.v2"
@@ -47,9 +48,11 @@ type DnsConfig struct {
 }
 
 type DNSSECConfig struct {
-	Enabled          bool   `yaml:"enabled"          envconfig:"DNSSEC_ENABLED"`
-	TrustAnchors     string `yaml:"trustAnchors"     envconfig:"DNSSEC_TRUST_ANCHORS"`
-	TrustAnchorsFile string `yaml:"trustAnchorsFile" envconfig:"DNSSEC_TRUST_ANCHORS_FILE"`
+	Enabled                   bool          `yaml:"enabled"                     envconfig:"DNSSEC_ENABLED"`
+	TrustAnchors              string        `yaml:"trustAnchors"                envconfig:"DNSSEC_TRUST_ANCHORS"`
+	TrustAnchorsFile          string        `yaml:"trustAnchorsFile"            envconfig:"DNSSEC_TRUST_ANCHORS_FILE"`
+	RootAnchorRefreshInterval time.Duration `yaml:"rootAnchorRefreshInterval"   envconfig:"DNSSEC_ROOT_ANCHOR_REFRESH_INTERVAL"`
+	RootAnchorHoldDown        time.Duration `yaml:"rootAnchorHoldDown"          envconfig:"DNSSEC_ROOT_ANCHOR_HOLD_DOWN"`
 }
 
 type DebugConfig struct {
@@ -111,7 +114,9 @@ var globalConfig = &Config{
 		RetryDelayMs:   100,
 		QueryTimeoutMs: 5000,
 		DNSSEC: DNSSECConfig{
-			TrustAnchors: string(defaultTrustAnchors),
+			TrustAnchors:              string(defaultTrustAnchors),
+			RootAnchorRefreshInterval: 24 * time.Hour,
+			RootAnchorHoldDown:        30 * 24 * time.Hour,
 		},
 		SOA: SOAConfig{
 			Mname:   "ns1.cdnsd.localhost.",
@@ -239,6 +244,12 @@ func Load(configFile string) (*Config, error) {
 			)
 		}
 		globalConfig.Dns.DNSSEC.TrustAnchors = string(anchorsContent)
+	}
+	if globalConfig.Dns.DNSSEC.RootAnchorRefreshInterval <= 0 {
+		globalConfig.Dns.DNSSEC.RootAnchorRefreshInterval = 24 * time.Hour
+	}
+	if globalConfig.Dns.DNSSEC.RootAnchorHoldDown <= 0 {
+		globalConfig.Dns.DNSSEC.RootAnchorHoldDown = 30 * 24 * time.Hour
 	}
 	return globalConfig, nil
 }

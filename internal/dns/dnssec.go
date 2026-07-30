@@ -80,7 +80,12 @@ func (r *Resolver) configuredTrustAnchors(zone string) []dns.RR {
 	if r == nil || !r.dnssecEnabled {
 		return nil
 	}
-	return slices.Clone(r.trustAnchors[canonicalDNSName(zone)])
+	zone = canonicalDNSName(zone)
+	anchors := slices.Clone(r.trustAnchors[zone])
+	if zone == "." && r.rootAnchorManager != nil {
+		anchors = append(anchors, r.rootAnchorManager.learnedAnchors()...)
+	}
+	return anchors
 }
 
 // trustAnchorsForZone combines operator-configured anchors with DS

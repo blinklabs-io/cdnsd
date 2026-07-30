@@ -46,6 +46,8 @@ Resolver for Cardano-based second-level domains on Handshake top-level domains
 | `dns.dnssec.enabled`    | bool         | `DNSSEC_ENABLED`                  | Validate recursive DNSSEC chains (default: false) |
 | `dns.dnssec.trustAnchors` | string     | `DNSSEC_TRUST_ANCHORS`            | DS or DNSKEY trust anchors in zone-file format |
 | `dns.dnssec.trustAnchorsFile` | string | `DNSSEC_TRUST_ANCHORS_FILE`       | File containing DS or DNSKEY trust anchors |
+| `dns.dnssec.rootAnchorRefreshInterval` | duration | `DNSSEC_ROOT_ANCHOR_REFRESH_INTERVAL` | RFC 5011 root DNSKEY refresh interval (default: 24h) |
+| `dns.dnssec.rootAnchorHoldDown` | duration | `DNSSEC_ROOT_ANCHOR_HOLD_DOWN` | RFC 5011 add/remove hold-down (default: 720h) |
 | `debug.address`         | string       | `DEBUG_ADDRESS`                   | Address for debug HTTP server (default: localhost) |
 | `debug.port`            | uint         | `DEBUG_PORT`                      | Port for debug HTTP server |
 | `indexer.network`       | string       | `INDEXER_NETWORK`                 | Cardano network name (e.g. preprod, mainnet) |
@@ -113,6 +115,21 @@ The bundled trust-anchor set contains the IANA KSK-2017 and KSK-2024
 anchors. Supplying `trustAnchors` or `trustAnchorsFile` replaces that set.
 Each non-comment line must be a complete `DS` or `DNSKEY` record, and
 anchors for multiple zones may be listed together.
+
+When DNSSEC is enabled, the root anchor set is refreshed from an authenticated
+root DNSKEY response. New SEP keys remain `add_pending` until the configured
+RFC 5011 hold-down has elapsed; missing keys enter `remove_pending`, and a
+revoked key is removed immediately. The state is stored in `state.dir` and is
+loaded before the first refresh, so a restart during hold-down does not reset
+the timer. Failed, unsigned, or otherwise unauthenticated responses are
+discarded and cannot replace the last known-good set. Refresh transitions are
+logged and exposed through `dnssec_root_anchor_transition_total` and
+`dnssec_root_anchor_active`.
+
+The bundled anchors are the bootstrap. Operators should monitor the transition
+metric and logs during a rollover. For manual recovery, stop cdnsd, preserve a
+backup, remove the `dnssec_root_anchor_state` entry from the Badger state
+directory, and restart with a verified `trustAnchorsFile`.
 
 Cardano and Handshake records do not need to descend from the ICANN root.
 When an on-chain delegation contains a `DS` record, cdnsd uses that record
