@@ -9,7 +9,9 @@ package config
 import (
 	_ "embed"
 	"fmt"
+	"net"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -34,17 +36,19 @@ type LoggingConfig struct {
 }
 
 type DnsConfig struct {
-	ListenAddress    string       `yaml:"address"          envconfig:"DNS_LISTEN_ADDRESS"`
-	ListenPort       uint         `yaml:"port"             envconfig:"DNS_LISTEN_PORT"`
-	ListenTlsPort    uint         `yaml:"tlsPort"          envconfig:"DNS_LISTEN_TLS_PORT"`
-	RecursionEnabled bool         `yaml:"recursionEnabled" envconfig:"DNS_RECURSION"`
-	RootHints        string       `yaml:"rootHints"        envconfig:"DNS_ROOT_HINTS"`
-	RootHintsFile    string       `yaml:"rootHintsFile"    envconfig:"DNS_ROOT_HINTS_FILE"`
-	RetryCount       int          `yaml:"retryCount"       envconfig:"DNS_RETRY_COUNT"`
-	RetryDelayMs     int          `yaml:"retryDelayMs"     envconfig:"DNS_RETRY_DELAY_MS"`
-	QueryTimeoutMs   int          `yaml:"queryTimeoutMs"   envconfig:"DNS_QUERY_TIMEOUT_MS"`
-	DNSSEC           DNSSECConfig `yaml:"dnssec"`
-	SOA              SOAConfig    `yaml:"soa"`
+	ListenAddress      string       `yaml:"address"          envconfig:"DNS_LISTEN_ADDRESS"`
+	ListenPort         uint         `yaml:"port"             envconfig:"DNS_LISTEN_PORT"`
+	ListenTlsPort      uint         `yaml:"tlsPort"          envconfig:"DNS_LISTEN_TLS_PORT"`
+	RecursionEnabled   bool         `yaml:"recursionEnabled" envconfig:"DNS_RECURSION"`
+	RecursionAllowlist []string     `yaml:"recursionAllowlist" envconfig:"DNS_RECURSION_ALLOWLIST"`
+	RootHints          string       `yaml:"rootHints"        envconfig:"DNS_ROOT_HINTS"`
+	RootHintsFile      string       `yaml:"rootHintsFile"    envconfig:"DNS_ROOT_HINTS_FILE"`
+	RetryCount         int          `yaml:"retryCount"       envconfig:"DNS_RETRY_COUNT"`
+	RetryDelayMs       int          `yaml:"retryDelayMs"     envconfig:"DNS_RETRY_DELAY_MS"`
+	QueryTimeoutMs     int          `yaml:"queryTimeoutMs"   envconfig:"DNS_QUERY_TIMEOUT_MS"`
+	RecursionTimeoutMs int          `yaml:"recursionTimeoutMs" envconfig:"DNS_RECURSION_TIMEOUT_MS"`
+	DNSSEC             DNSSECConfig `yaml:"dnssec"`
+	SOA                SOAConfig    `yaml:"soa"`
 }
 
 type DNSSECConfig struct {
@@ -100,19 +104,31 @@ var defaultRootHints []byte
 //go:embed root.keys
 var defaultTrustAnchors []byte
 
+var defaultRecursionAllowlist = []string{
+	"127.0.0.0/8",
+	"::1/128",
+}
+
+// DefaultDNSRecursionAllowlist returns the safe default client networks.
+func DefaultDNSRecursionAllowlist() []string {
+	return slices.Clone(defaultRecursionAllowlist)
+}
+
 // Singleton config instance with default values
 var globalConfig = &Config{
 	Logging: LoggingConfig{
 		QueryLog: true,
 	},
 	Dns: DnsConfig{
-		ListenAddress:  "",
-		ListenPort:     8053,
-		ListenTlsPort:  8853,
-		RootHints:      string(defaultRootHints),
-		RetryCount:     3,
-		RetryDelayMs:   100,
-		QueryTimeoutMs: 5000,
+		ListenAddress:      "",
+		ListenPort:         8053,
+		ListenTlsPort:      8853,
+		RecursionAllowlist: slices.Clone(defaultRecursionAllowlist),
+		RootHints:          string(defaultRootHints),
+		RetryCount:         3,
+		RetryDelayMs:       100,
+		QueryTimeoutMs:     5000,
+		RecursionTimeoutMs: 10000,
 		DNSSEC: DNSSECConfig{
 			TrustAnchors:              string(defaultTrustAnchors),
 			RootAnchorRefreshInterval: 24 * time.Hour,
@@ -216,11 +232,39 @@ func Load(configFile string) (*Config, error) {
 	if globalConfig.Dns.RetryCount < 1 {
 		globalConfig.Dns.RetryCount = 1
 	}
+	if globalConfig.Dns.RetryCount > 10 {
+		globalConfig.Dns.RetryCount = 10
+	}
 	if globalConfig.Dns.RetryDelayMs < 0 {
 		globalConfig.Dns.RetryDelayMs = 0
 	}
+	if globalConfig.Dns.RetryDelayMs > 10000 {
+		globalConfig.Dns.RetryDelayMs = 10000
+	}
 	if globalConfig.Dns.QueryTimeoutMs <= 0 {
-		globalConfig.Dns.QueryTimeoutMs = 1
+		globalConfig.Dns.QueryTimeoutMs = 5000
+	}
+	if globalConfig.Dns.QueryTimeoutMs > 30000 {
+		globalConfig.Dns.QueryTimeoutMs = 30000
+	}
+	if globalConfig.Dns.RecursionTimeoutMs <= 0 {
+		globalConfig.Dns.RecursionTimeoutMs = 10000
+	}
+	if globalConfig.Dns.RecursionTimeoutMs > 120000 {
+		globalConfig.Dns.RecursionTimeoutMs = 120000
+	}
+	if len(globalConfig.Dns.RecursionAllowlist) == 0 {
+		globalConfig.Dns.RecursionAllowlist = slices.Clone(defaultRecursionAllowlist)
+	}
+	for i, network := range globalConfig.Dns.RecursionAllowlist {
+		network = strings.TrimSpace(network)
+		globalConfig.Dns.RecursionAllowlist[i] = network
+		if ip := net.ParseIP(network); ip != nil {
+			continue
+		}
+		if _, _, err := net.ParseCIDR(network); err != nil {
+			return nil, fmt.Errorf("invalid DNS recursion allowlist entry %q: %w", network, err)
+		}
 	}
 	// Load root hints
 	if globalConfig.Dns.RootHintsFile != "" {
