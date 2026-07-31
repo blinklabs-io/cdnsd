@@ -987,6 +987,13 @@ func lookupLocalZoneDNSSECRecords(
 	zone string,
 	fromHandshake bool,
 ) ([]dns.RR, error) {
+	return lookupCachedLocalZoneDNSSECRecords(zone, fromHandshake)
+}
+
+func lookupLocalZoneDNSSECRecordsUncached(
+	zone string,
+	fromHandshake bool,
+) ([]dns.RR, error) {
 	recordTypes := []string{"NSEC", "NSEC3", "RRSIG"}
 	var (
 		records []state.DomainRecord
