@@ -57,6 +57,7 @@ type Domain struct {
 type Indexer struct {
 	pipeline       *pipeline.Pipeline
 	domains        map[string]Domain
+	watchedMu      sync.RWMutex
 	tipReached     bool
 	syncLogTimer   *time.Timer
 	syncStatus     input_chainsync.ChainSyncStatus
@@ -111,13 +112,13 @@ func (i *Indexer) Start() error {
 func (i *Indexer) startCardano(stopCh <-chan struct{}) error {
 	// Build watched addresses from enabled profiles
 	cfg := config.GetConfig()
-	i.watched = nil
+	var watched []watchedAddr
 	i.tipReached = false
 	for _, profile := range config.GetProfiles() {
 		if profile.ScriptAddress != "" {
 			// Add a static TLD mapping
-			i.watched = append(
-				i.watched,
+			watched = append(
+				watched,
 				watchedAddr{
 					Address:  profile.ScriptAddress,
 					Tld:      profile.Tld,
@@ -126,8 +127,8 @@ func (i *Indexer) startCardano(stopCh <-chan struct{}) error {
 			)
 		} else if profile.DiscoveryAddress != "" {
 			// Add an auto-discovery address
-			i.watched = append(
-				i.watched,
+			watched = append(
+				watched,
 				watchedAddr{
 					Address:   profile.DiscoveryAddress,
 					PolicyId:  profile.PolicyId,
@@ -142,8 +143,8 @@ func (i *Indexer) startCardano(stopCh <-chan struct{}) error {
 		return err
 	}
 	for _, tmpAddr := range discoveredAddr {
-		i.watched = append(
-			i.watched,
+		watched = append(
+			watched,
 			watchedAddr{
 				Address:  tmpAddr.Address,
 				PolicyId: tmpAddr.PolicyId,
@@ -151,6 +152,9 @@ func (i *Indexer) startCardano(stopCh <-chan struct{}) error {
 			},
 		)
 	}
+	i.watchedMu.Lock()
+	i.watched = watched
+	i.watchedMu.Unlock()
 	// Create pipeline
 	i.pipeline = pipeline.New()
 	// Configure pipeline input
@@ -289,7 +293,10 @@ func (i *Indexer) handleEvent(evt event.Event) error {
 		if outAddrPayment == nil {
 			continue
 		}
-		for _, watchedAddr := range i.watched {
+		i.watchedMu.RLock()
+		watched := append([]watchedAddr(nil), i.watched...)
+		i.watchedMu.RUnlock()
+		for _, watchedAddr := range watched {
 			if watchedAddr.Discovery {
 				if outAddr.String() == watchedAddr.Address ||
 					outAddrPayment.String() == watchedAddr.Address {
@@ -378,43 +385,17 @@ func (i *Indexer) handleEventOutputDns(
 				)
 				return nil
 			}
-			// Make sure all records are for specified origin domain
-			badRecordName := false
-			for _, record := range dnsDomain.Records {
-				recordName := dns.CanonicalName(
-					string(record.Lhs),
-				)
-				if !strings.HasSuffix(recordName, domainName) {
-					slog.Warn(
-						fmt.Sprintf(
-							"ignoring datum with record %q outside of origin domain (%s)",
-							recordName,
-							domainName,
-						),
-					)
-					badRecordName = true
-					break
-				}
-			}
-			if badRecordName {
-				return nil
-			}
 		}
-		// Convert domain records into our storage format
-		tmpRecords := []state.DomainRecord{}
-		for _, record := range dnsDomain.Records {
-			tmpRecord := state.DomainRecord{
-				Lhs:  string(record.Lhs),
-				Type: string(record.Type),
-				Rhs:  string(record.Rhs),
-			}
-			if record.Ttl.HasValue() {
-				if record.Ttl.Value > math.MaxInt {
-					return errors.New("record ttl value out of bounds")
-				}
-				tmpRecord.Ttl = int(record.Ttl.Value) // #nosec G115
-			}
-			tmpRecords = append(tmpRecords, tmpRecord)
+		// Validate and convert all records before publishing any of them. A
+		// malformed, unsupported, or out-of-zone record invalidates the datum.
+		tmpRecords, err := validateAndConvertRecords(domainName, dnsDomain.Records)
+		if err != nil {
+			slog.Warn(
+				"ignoring invalid DNS datum",
+				"domain", domainName,
+				"error", err,
+			)
+			return nil
 		}
 		if err := state.GetState().UpdateDomain(domainName, tmpRecords); err != nil {
 			return err
@@ -424,6 +405,98 @@ func (i *Indexer) handleEventOutputDns(
 		)
 	}
 	return nil
+}
+
+func validateAndConvertRecords(
+	domainName string,
+	records []models.CardanoDnsDomainRecord,
+) ([]state.DomainRecord, error) {
+	domainName = dns.CanonicalName(domainName)
+	if domainName == "." {
+		return nil, errors.New("indexed domain is the DNS root")
+	}
+	if _, ok := dns.IsDomainName(domainName); !ok {
+		return nil, fmt.Errorf("invalid indexed domain name %q", domainName)
+	}
+	ret := make([]state.DomainRecord, 0, len(records))
+	for _, record := range records {
+		recordName := dns.CanonicalName(string(record.Lhs))
+		if recordName == "." {
+			return nil, errors.New("indexed record has an empty owner name")
+		}
+		if _, ok := dns.IsDomainName(recordName); !ok {
+			return nil, fmt.Errorf("invalid indexed record name %q", record.Lhs)
+		}
+		if !nameWithinZone(recordName, domainName) {
+			return nil, fmt.Errorf(
+				"record name %q is outside indexed domain %q",
+				recordName,
+				domainName,
+			)
+		}
+		recordType := strings.ToUpper(strings.TrimSpace(string(record.Type)))
+		if _, ok := dns.StringToType[recordType]; !ok {
+			return nil, fmt.Errorf("unsupported indexed record type %q", record.Type)
+		}
+		if strings.ContainsAny(recordType, " \t\r\n") {
+			return nil, fmt.Errorf("invalid indexed record type %q", record.Type)
+		}
+		if strings.ContainsAny(string(record.Rhs), "\r\n") {
+			return nil, errors.New("indexed record data contains a line break")
+		}
+		ttl := 0
+		if record.Ttl.HasValue() {
+			if record.Ttl.Value > math.MaxInt {
+				return nil, errors.New("record ttl value out of bounds")
+			}
+			ttl = int(record.Ttl.Value) // #nosec G115
+		}
+		if _, err := dns.NewRR(fmt.Sprintf(
+			"%s %d IN %s %s",
+			recordName,
+			ttl,
+			recordType,
+			string(record.Rhs),
+		)); err != nil {
+			return nil, fmt.Errorf("invalid %s record %q: %w", recordType, recordName, err)
+		}
+		ret = append(ret, state.DomainRecord{
+			Lhs:  recordName,
+			Type: recordType,
+			Ttl:  ttl,
+			Rhs:  string(record.Rhs),
+		})
+	}
+	return ret, nil
+}
+
+func nameWithinZone(name, zone string) bool {
+	name = dns.CanonicalName(name)
+	zone = dns.CanonicalName(zone)
+	if _, ok := dns.IsDomainName(name); !ok {
+		return false
+	}
+	if _, ok := dns.IsDomainName(zone); !ok {
+		return false
+	}
+	nameLabels := dns.SplitDomainName(name)
+	zoneLabels := dns.SplitDomainName(zone)
+	if zoneLabels == nil {
+		return true
+	}
+	if nameLabels == nil {
+		return false
+	}
+	if len(nameLabels) < len(zoneLabels) {
+		return false
+	}
+	for idx := range zoneLabels {
+		nameIdx := len(nameLabels) - len(zoneLabels) + idx
+		if !strings.EqualFold(nameLabels[nameIdx], zoneLabels[idx]) {
+			return false
+		}
+	}
+	return true
 }
 
 func (i *Indexer) handleEventOutputDiscovery(
@@ -488,6 +561,7 @@ func (i *Indexer) handleEventOutputDiscovery(
 		if err != nil {
 			return err
 		}
+		i.watchedMu.Lock()
 		i.watched = append(
 			i.watched,
 			watchedAddr{
@@ -499,6 +573,7 @@ func (i *Indexer) handleEventOutputDiscovery(
 				Address:  scriptAddr.String(),
 			},
 		)
+		i.watchedMu.Unlock()
 		// Add to state
 		err = state.GetState().AddDiscoveredAddress(
 			state.DiscoveredAddress{
