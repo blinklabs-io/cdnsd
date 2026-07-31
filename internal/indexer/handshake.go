@@ -7,6 +7,8 @@
 package indexer
 
 import (
+	"bytes"
+	"crypto/sha3"
 	"encoding/base32"
 	"encoding/hex"
 	"errors"
@@ -27,6 +29,73 @@ type handshakeState struct {
 	peerBackoffDelay time.Duration
 	lastBlockHash    [32]byte
 	hasLastBlock     bool
+}
+
+// validateHandshakeStateChanges performs all state lookups and resource-data
+// conversion before the block is allowed to mutate persistent state. This is
+// intentionally bounded: State has no transactional block journal, so a
+// database write failure can still leave a partially applied block. Reorgs
+// are therefore detected and rejected by parent-hash continuity, while full
+// rollback remains outside this indexer's current state API.
+func validateHandshakeStateChanges(block *handshake.Block) error {
+	if block == nil {
+		return errors.New("cannot validate a nil Handshake block")
+	}
+	for txIndex, tx := range block.Transactions {
+		for outputIndex, output := range tx.Outputs {
+			cov, err := output.Covenant.CheckedCovenant()
+			if err != nil {
+				return fmt.Errorf(
+					"transaction %d output %d covenant: %w",
+					txIndex,
+					outputIndex,
+					err,
+				)
+			}
+			switch c := cov.(type) {
+			case *handshake.RegisterCovenant:
+				name, err := state.GetState().GetHandshakeNameByHash(c.NameHash)
+				if err != nil {
+					return fmt.Errorf("resolve register name: %w", err)
+				}
+				if _, err := handshakeResourceDataToDomainRecords(
+					name,
+					c.ResourceData,
+				); err != nil {
+					return fmt.Errorf("validate register records: %w", err)
+				}
+			case *handshake.UpdateCovenant:
+				name, err := state.GetState().GetHandshakeNameByHash(c.NameHash)
+				if err != nil {
+					return fmt.Errorf("resolve update name: %w", err)
+				}
+				if _, err := handshakeResourceDataToDomainRecords(
+					name,
+					c.ResourceData,
+				); err != nil {
+					return fmt.Errorf("validate update records: %w", err)
+				}
+			case *handshake.RenewCovenant:
+				if _, err := state.GetState().GetHandshakeNameByHash(c.NameHash); err != nil {
+					return fmt.Errorf("resolve renewal name: %w", err)
+				}
+			case *handshake.TransferCovenant:
+				if _, err := state.GetState().GetHandshakeNameByHash(c.NameHash); err != nil {
+					return fmt.Errorf("resolve transfer name: %w", err)
+				}
+			case *handshake.FinalizeCovenant:
+				nameHash := sha3.Sum256([]byte(c.RawName))
+				if !bytes.Equal(c.NameHash, nameHash[:]) {
+					return errors.New("finalize name hash does not match raw name")
+				}
+			case *handshake.RevokeCovenant:
+				if _, err := state.GetState().GetHandshakeNameByHash(c.NameHash); err != nil {
+					return fmt.Errorf("resolve revoke name: %w", err)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func (i *Indexer) startHandshake(stopCh <-chan struct{}) error {
@@ -200,6 +269,9 @@ func (i *Indexer) handshakeReconnectPeer(stopCh <-chan struct{}) {
 }
 
 func (i *Indexer) handshakeHandleSync(block *handshake.Block) error {
+	if block == nil {
+		return errors.New("received nil Handshake block")
+	}
 	slog.Debug(
 		"synced Handshake block",
 		"hash", fmt.Sprintf("%x", block.Hash()),
@@ -225,11 +297,20 @@ func (i *Indexer) handshakeHandleSync(block *handshake.Block) error {
 			err,
 		)
 	}
+	// Parse every covenant and resolve every existing-state dependency before
+	// applying any output. This prevents malformed later outputs from causing
+	// avoidable partial state application.
+	if err := validateHandshakeStateChanges(block); err != nil {
+		return fmt.Errorf("handshake block state preflight failed: %w", err)
+	}
 	// Process transactions
 	for _, tx := range block.Transactions {
 		// Process outputs
 		for _, output := range tx.Outputs {
-			cov := output.Covenant.Covenant()
+			cov, err := output.Covenant.CheckedCovenant()
+			if err != nil {
+				return fmt.Errorf("decode Handshake covenant: %w", err)
+			}
 			switch c := cov.(type) {
 			case *handshake.OpenCovenant:
 				if err := state.GetState().AddHandshakeName(c.RawName); err != nil {
