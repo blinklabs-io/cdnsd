@@ -41,9 +41,10 @@ var metricQueryTotal = promauto.NewCounter(prometheus.CounterOpts{
 // Resolver handles DNS queries using configured root hints for
 // recursive resolution.
 type Resolver struct {
-	rootHints     map[uint16]map[string][]dns.RR
-	dnssecEnabled bool
-	trustAnchors  map[string][]dns.RR
+	rootHints         map[uint16]map[string][]dns.RR
+	dnssecEnabled     bool
+	trustAnchors      map[string][]dns.RR
+	rootAnchorManager *rootAnchorManager
 }
 
 // NewResolver creates a resolver from the provided config.
@@ -56,6 +57,9 @@ func NewResolver(cfg *config.Config) (*Resolver, error) {
 	}
 	if err := resolver.loadTrustAnchors(cfg); err != nil {
 		return nil, err
+	}
+	if resolver.dnssecEnabled {
+		resolver.rootAnchorManager = newRootAnchorManager(resolver, cfg)
 	}
 	return resolver, nil
 }
@@ -215,8 +219,9 @@ func (r *Resolver) resolveNameserverAddress(
 
 // Server owns the DNS listeners started by Start.
 type Server struct {
-	servers []*dns.Server
-	errCh   chan error
+	servers         []*dns.Server
+	errCh           chan error
+	stopRootAnchors func()
 
 	stopOnce sync.Once
 	stopErr  error
@@ -237,6 +242,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	}
 	s.stopOnce.Do(func() {
 		var errs []error
+		if s.stopRootAnchors != nil {
+			s.stopRootAnchors()
+		}
 		for _, server := range s.servers {
 			if err := server.ShutdownContext(ctx); err != nil && !isServerNotStarted(err) {
 				errs = append(errs, err)
@@ -477,7 +485,13 @@ func Start() (*Server, error) {
 		servers: servers,
 		errCh:   make(chan error, len(servers)),
 	}
+	if resolver.rootAnchorManager != nil {
+		server.stopRootAnchors = resolver.rootAnchorManager.start()
+	}
 	if err := startDNSListeners(server, servers); err != nil {
+		if server.stopRootAnchors != nil {
+			server.stopRootAnchors()
+		}
 		return nil, err
 	}
 	return server, nil

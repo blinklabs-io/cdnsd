@@ -35,6 +35,7 @@ const (
 	handshakeNameHashKeyPrefix = "hs_name_hash_"
 	handshakeDomainKeyPrefix   = "hs_d_"
 	handshakeRecordKeyPrefix   = "hs_r_"
+	dnssecRootAnchorStateKey   = "dnssec_root_anchor_state"
 )
 
 // ErrStateNotLoaded is returned when an operation needs a loaded state database.
@@ -628,6 +629,32 @@ func (s *State) GetHandshakeCursor() (string, error) {
 		return "", nil
 	}
 	return blockHash, err
+}
+
+// GetDNSSECRootAnchorState returns the opaque, persisted RFC 5011 state.
+// Keeping serialization in the DNS package lets state remain independent of
+// the trust-anchor state machine while still providing atomic persistence.
+func (s *State) GetDNSSECRootAnchorState() ([]byte, error) {
+	var value []byte
+	err := s.view(func(txn *badger.Txn) error {
+		item, err := txn.Get([]byte(dnssecRootAnchorStateKey))
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		value, err = item.ValueCopy(nil)
+		return err
+	})
+	return value, err
+}
+
+// SetDNSSECRootAnchorState atomically replaces the persisted RFC 5011 state.
+func (s *State) SetDNSSECRootAnchorState(value []byte) error {
+	return s.update(func(txn *badger.Txn) error {
+		return txn.Set([]byte(dnssecRootAnchorStateKey), value)
+	})
 }
 
 func (s *State) AddHandshakeName(name string) error {
