@@ -236,6 +236,9 @@ func TestValidatingQuerySetsAuthenticatedData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("queryMultipleNameserversWithPort() error = %v", err)
 	}
+	if resp == nil {
+		t.Fatal("queryMultipleNameserversWithPort() returned nil response")
+	}
 	if !resp.AuthenticatedData {
 		t.Fatal("validated response did not have the AD bit")
 	}

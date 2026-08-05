@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -340,8 +341,9 @@ func stateIsLoaded() bool {
 }
 
 type captureResponseWriter struct {
-	msg *dns.Msg
-	raw []byte
+	msg    *dns.Msg
+	raw    []byte
+	remote net.Addr
 }
 
 func (w *captureResponseWriter) LocalAddr() net.Addr {
@@ -349,6 +351,9 @@ func (w *captureResponseWriter) LocalAddr() net.Addr {
 }
 
 func (w *captureResponseWriter) RemoteAddr() net.Addr {
+	if w.remote != nil {
+		return w.remote
+	}
 	return &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 12345}
 }
 
@@ -463,6 +468,53 @@ func TestHandleQueryNilRequestDoesNotPanic(t *testing.T) {
 	resolver.handleQuery(w, nil)
 }
 
+func TestRecursionAllowlist(t *testing.T) {
+	cfg := *config.GetConfig()
+	cfg.Dns.RecursionAllowlist = []string{"192.0.2.0/24", "2001:db8::1"}
+	resolver, err := NewResolver(&cfg)
+	if err != nil {
+		t.Fatalf("NewResolver() error = %v", err)
+	}
+
+	if !resolver.recursionAllowed(&captureResponseWriter{
+		remote: &net.UDPAddr{IP: net.ParseIP("192.0.2.10"), Port: 53},
+	}) {
+		t.Error("allowlisted IPv4 client was rejected")
+	}
+	if !resolver.recursionAllowed(&captureResponseWriter{
+		remote: &net.UDPAddr{IP: net.ParseIP("2001:db8::1"), Port: 53},
+	}) {
+		t.Error("allowlisted IPv6 client was rejected")
+	}
+	if resolver.recursionAllowed(&captureResponseWriter{
+		remote: &net.UDPAddr{IP: net.ParseIP("198.51.100.1"), Port: 53},
+	}) {
+		t.Error("non-allowlisted client was accepted")
+	}
+}
+
+func TestUnsupportedClassReturnsNotImplementedAndRA(t *testing.T) {
+	cfg := config.GetConfig()
+	original := cfg.Dns.RecursionEnabled
+	cfg.Dns.RecursionEnabled = true
+	t.Cleanup(func() { cfg.Dns.RecursionEnabled = original })
+
+	req := new(dns.Msg)
+	req.SetQuestion("example.", dns.TypeA)
+	req.Question[0].Qclass = dns.ClassCHAOS
+	w := &captureResponseWriter{}
+	(&Resolver{}).handleQuery(w, req)
+	if w.msg == nil {
+		t.Fatal("expected response")
+	}
+	if w.msg.Rcode != dns.RcodeNotImplemented {
+		t.Fatalf("rcode = %s, want NOTIMP", dns.RcodeToString[w.msg.Rcode])
+	}
+	if !w.msg.RecursionAvailable {
+		t.Error("expected RA when recursion is enabled")
+	}
+}
+
 func TestNewResolverLoadsRootHints(t *testing.T) {
 	cfg := *config.GetConfig()
 	cfg.Dns.RootHints = strings.Join(
@@ -484,14 +536,18 @@ func TestNewResolverLoadsRootHints(t *testing.T) {
 	if len(resolver.rootHints[dns.TypeNS]["."]) != 1 {
 		t.Errorf("expected one root NS hint")
 	}
-	if len(resolver.rootHints[dns.TypeA]["A.ROOT-TEST."]) != 1 {
+	if len(resolver.rootHints[dns.TypeA]["a.root-test."]) != 1 {
 		t.Errorf("expected one root A hint")
 	}
-	if len(resolver.rootHints[dns.TypeAAAA]["A.ROOT-TEST."]) != 1 {
+	if len(resolver.rootHints[dns.TypeAAAA]["a.root-test."]) != 1 {
 		t.Errorf("expected one root AAAA hint")
 	}
 	if rootNS := resolver.getRandomRootServer(); rootNS != "192.0.2.1:53" {
-		t.Errorf("expected root server 192.0.2.1:53, got %q", rootNS)
+		t.Errorf("expected IPv4 root server, got %q", rootNS)
+	}
+	rootServers := resolver.rootServers()
+	if len(rootServers) != 2 || rootServers[0] != "192.0.2.1:53" || rootServers[1] != "[2001:db8::1]:53" {
+		t.Errorf("root server order = %v, want IPv4 followed by IPv6", rootServers)
 	}
 }
 
@@ -1053,6 +1109,25 @@ func TestQueryWithRetryFirstAttemptSuccess(t *testing.T) {
 	}
 	if attempts != 1 {
 		t.Errorf("expected 1 attempt, got %d", attempts)
+	}
+}
+
+func TestQueryWithRetryContextCancelsBackoff(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	started := make(chan struct{})
+	var once sync.Once
+	go func() {
+		<-started
+		cancel()
+	}()
+
+	_, err := queryWithRetryContext(ctx, func() (*dns.Msg, error) {
+		once.Do(func() { close(started) })
+		return nil, errors.New("temporary failure")
+	}, 3, time.Second)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
 	}
 }
 
