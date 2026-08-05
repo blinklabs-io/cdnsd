@@ -7,6 +7,8 @@
 package indexer
 
 import (
+	"encoding/base32"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -438,11 +440,11 @@ func validateAndConvertRecords(
 		if _, ok := dns.StringToType[recordType]; !ok {
 			return nil, fmt.Errorf("unsupported indexed record type %q", record.Type)
 		}
-		if strings.ContainsAny(recordType, " \t\r\n") {
-			return nil, fmt.Errorf("invalid indexed record type %q", record.Type)
-		}
 		if strings.ContainsAny(string(record.Rhs), "\r\n") {
 			return nil, errors.New("indexed record data contains a line break")
+		}
+		if containsUnquotedComment(string(record.Rhs)) {
+			return nil, errors.New("indexed record data contains a zone-file comment")
 		}
 		ttl := 0
 		if record.Ttl.HasValue() {
@@ -451,13 +453,20 @@ func validateAndConvertRecords(
 			}
 			ttl = int(record.Ttl.Value) // #nosec G115
 		}
-		if _, err := dns.NewRR(fmt.Sprintf(
+		rr, err := dns.NewRR(fmt.Sprintf(
 			"%s %d IN %s %s",
 			recordName,
 			ttl,
 			recordType,
 			string(record.Rhs),
-		)); err != nil {
+		))
+		if err != nil {
+			return nil, fmt.Errorf("invalid %s record %q: %w", recordType, recordName, err)
+		}
+		if rr == nil {
+			return nil, fmt.Errorf("invalid %s record %q: parser returned no record", recordType, recordName)
+		}
+		if err := validateEncodedDNSSECFields(rr); err != nil {
 			return nil, fmt.Errorf("invalid %s record %q: %w", recordType, recordName, err)
 		}
 		ret = append(ret, state.DomainRecord{
@@ -468,6 +477,71 @@ func validateAndConvertRecords(
 		})
 	}
 	return ret, nil
+}
+
+func containsUnquotedComment(value string) bool {
+	quoted := false
+	escaped := false
+	for _, char := range value {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if char == '\\' {
+			escaped = true
+			continue
+		}
+		if char == '"' {
+			quoted = !quoted
+			continue
+		}
+		if char == ';' && !quoted {
+			return true
+		}
+	}
+	return false
+}
+
+func validateEncodedDNSSECFields(rr dns.RR) error {
+	decodeBase64 := func(field, value string) error {
+		if value == "" {
+			return fmt.Errorf("%s is empty", field)
+		}
+		if _, err := base64.StdEncoding.DecodeString(value); err != nil {
+			return fmt.Errorf("invalid %s: %w", field, err)
+		}
+		return nil
+	}
+	decodeHex := func(field, value string) error {
+		if value == "" {
+			return fmt.Errorf("%s is empty", field)
+		}
+		if _, err := hex.DecodeString(value); err != nil {
+			return fmt.Errorf("invalid %s: %w", field, err)
+		}
+		return nil
+	}
+
+	switch record := rr.(type) {
+	case *dns.DNSKEY:
+		return decodeBase64("DNSKEY public key", record.PublicKey)
+	case *dns.DS:
+		return decodeHex("DS digest", record.Digest)
+	case *dns.RRSIG:
+		return decodeBase64("RRSIG signature", record.Signature)
+	case *dns.NSEC3:
+		if record.Salt != "" {
+			if err := decodeHex("NSEC3 salt", record.Salt); err != nil {
+				return err
+			}
+		}
+		if _, err := base32.HexEncoding.WithPadding(base32.NoPadding).DecodeString(
+			strings.ToUpper(record.NextDomain),
+		); err != nil {
+			return fmt.Errorf("invalid NSEC3 next owner hash: %w", err)
+		}
+	}
+	return nil
 }
 
 func nameWithinZone(name, zone string) bool {

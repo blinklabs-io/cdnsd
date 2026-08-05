@@ -58,6 +58,30 @@ func TestValidateAndConvertRecordsRejectsUnsafeData(t *testing.T) {
 			name:   "malformed address",
 			record: validRecord("A", "alice.cardano.", "999.0.2.1"),
 		},
+		{
+			name:   "unquoted zone-file comment",
+			record: validRecord("A", "alice.cardano.", "192.0.2.1;garbage"),
+		},
+		{
+			name: "malformed RRSIG signature",
+			record: validRecord(
+				"RRSIG",
+				"alice.cardano.",
+				"A 8 2 300 20270101000000 20260101000000 12345 alice.cardano. not-base64",
+			),
+		},
+		{
+			name:   "malformed DNSKEY public key",
+			record: validRecord("DNSKEY", "alice.cardano.", "257 3 8 not-base64"),
+		},
+		{
+			name:   "malformed DS digest",
+			record: validRecord("DS", "alice.cardano.", "12345 8 2 not-hex"),
+		},
+		{
+			name:   "malformed NSEC3 salt",
+			record: validRecord("NSEC3", "alice.cardano.", "1 0 0 not-hex ABCD A"),
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -80,5 +104,20 @@ func TestValidateAndConvertRecordsRejectsUnsafeData(t *testing.T) {
 	}
 	if len(records) != 2 || !strings.EqualFold(records[0].Type, "A") {
 		t.Fatalf("unexpected converted records: %#v", records)
+	}
+
+	quotedComment, err := validateAndConvertRecords(
+		"alice.cardano.",
+		[]models.CardanoDnsDomainRecord{validRecord(
+			"TXT",
+			"alice.cardano.",
+			`"hello;world"`,
+		)},
+	)
+	if err != nil {
+		t.Fatalf("quoted semicolon rejected: %v", err)
+	}
+	if quotedComment[0].Rhs != `"hello;world"` {
+		t.Fatalf("quoted semicolon was changed: %q", quotedComment[0].Rhs)
 	}
 }
