@@ -273,51 +273,52 @@ func (r *Resolver) resolveNameserverAddress(
 		childCtx.validation = validation
 	}
 
-	// Start from root hints and resolve iteratively
-	rootNS := r.getRandomRootServer()
-	if rootNS == "" {
+	// Start from root hints and resolve iteratively. Try IPv4 roots first,
+	// then IPv6 roots so IPv6-only deployments still have a fallback when
+	// IPv4 transport is unavailable.
+	rootServers := r.rootServers()
+	if len(rootServers) == 0 {
 		return nil, errors.New("no root servers available")
 	}
 
 	// Query both address families. A nameserver may be IPv6-only.
 	var lastErr error
-	for _, queryType := range []uint16{dns.TypeA, dns.TypeAAAA} {
-		if err := requestContext(ctx).Err(); err != nil {
-			return nil, err
-		}
-		msg := new(dns.Msg)
-		msg.SetQuestion(nsName, queryType)
-		msg.RecursionDesired = true
-		resp, err := r.doQueryWithContext(msg, rootNS, true, childCtx)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		if resp == nil {
-			lastErr = fmt.Errorf("received nil response for %s", nsName)
-			continue
-		}
-		for _, rr := range resp.Answer {
-			switch v := rr.(type) {
-			case *dns.A:
-				ips = append(ips, v.A)
-			case *dns.AAAA:
-				ips = append(ips, v.AAAA)
+	for _, rootNS := range rootServers {
+		var rootIPs []net.IP
+		for _, queryType := range []uint16{dns.TypeA, dns.TypeAAAA} {
+			if err := requestContext(ctx).Err(); err != nil {
+				return nil, err
+			}
+			msg := new(dns.Msg)
+			msg.SetQuestion(nsName, queryType)
+			msg.RecursionDesired = true
+			resp, err := r.doQueryWithContext(msg, rootNS, true, childCtx)
+			if err != nil {
+				lastErr = fmt.Errorf("query root %s for %s: %w", rootNS, nsName, err)
+				continue
+			}
+			if resp == nil {
+				lastErr = fmt.Errorf("received nil response for %s", nsName)
+				continue
+			}
+			for _, rr := range resp.Answer {
+				switch v := rr.(type) {
+				case *dns.A:
+					rootIPs = append(rootIPs, v.A)
+				case *dns.AAAA:
+					rootIPs = append(rootIPs, v.AAAA)
+				}
 			}
 		}
-		if len(ips) > 0 {
-			break
+		if len(rootIPs) > 0 {
+			return rootIPs, nil
 		}
 	}
 
-	if len(ips) == 0 {
-		if lastErr != nil {
-			return nil, fmt.Errorf("upstream resolution failed for %s: %w", nsName, lastErr)
-		}
-		return nil, fmt.Errorf("no A/AAAA records in upstream response for %s", nsName)
+	if len(ips) == 0 && lastErr != nil {
+		return nil, fmt.Errorf("upstream resolution failed for %s: %w", nsName, lastErr)
 	}
-
-	return ips, nil
+	return nil, fmt.Errorf("no A/AAAA records in upstream response for %s", nsName)
 }
 
 // Server owns the DNS listeners started by Start.
@@ -375,14 +376,12 @@ func isServerNotStarted(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "server not started")
 }
 
-// getRandomRootServer returns a random root server address from hints
-func (r *Resolver) getRandomRootServer() string {
+func (r *Resolver) rootServers() []string {
 	if r == nil || r.rootHints == nil {
-		return ""
+		return nil
 	}
-	// Prefer IPv4 for deployments without IPv6 connectivity, falling back to
-	// IPv6 only when no IPv4 root hint is available.
-	var ipv4Servers, ipv6Servers []string
+	ipv4Servers := make([]string, 0)
+	ipv6Servers := make([]string, 0)
 	for _, rrs := range r.rootHints[dns.TypeA] {
 		for _, rr := range rrs {
 			if address, ok := rr.(*dns.A); ok {
@@ -397,19 +396,19 @@ func (r *Resolver) getRandomRootServer() string {
 			}
 		}
 	}
-	servers := ipv4Servers
-	if len(servers) == 0 {
-		servers = ipv6Servers
-	}
+	// Shuffle each family independently, preserving IPv4-first fallback.
+	shuffleStrings(ipv4Servers)
+	shuffleStrings(ipv6Servers)
+	return append(ipv4Servers, ipv6Servers...)
+}
+
+// getRandomRootServer returns a random root server address from hints.
+func (r *Resolver) getRandomRootServer() string {
+	servers := r.rootServers()
 	if len(servers) == 0 {
 		return ""
 	}
-	// Select one at random
-	n, err := rand.Int(rand.Reader, big.NewInt(int64(len(servers))))
-	if err != nil {
-		return servers[0] // Fallback to first if random fails
-	}
-	return servers[n.Int64()]
+	return servers[0]
 }
 
 // generateSyntheticSOA creates a SOA record for a blockchain
@@ -994,7 +993,7 @@ func (r *Resolver) handleQuery(w dns.ResponseWriter, req *dns.Msg) {
 	// Only blockchain zones are authoritative for negative answers. REFUSED
 	// avoids poisoning a client's negative cache for unrelated names.
 	zone := findZoneForName(canonicalName)
-	if !recursiveRequested && zone == "" {
+	if zone == "" {
 		writeRcode(w, req, dns.RcodeRefused, cfg.Dns.RecursionEnabled)
 		return
 	}

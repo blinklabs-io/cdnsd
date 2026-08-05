@@ -545,6 +545,10 @@ func TestNewResolverLoadsRootHints(t *testing.T) {
 	if rootNS := resolver.getRandomRootServer(); rootNS != "192.0.2.1:53" {
 		t.Errorf("expected IPv4 root server, got %q", rootNS)
 	}
+	rootServers := resolver.rootServers()
+	if len(rootServers) != 2 || rootServers[0] != "192.0.2.1:53" || rootServers[1] != "[2001:db8::1]:53" {
+		t.Errorf("root server order = %v, want IPv4 followed by IPv6", rootServers)
+	}
 }
 
 func TestResolveNameserverAddressFromLocal(t *testing.T) {
