@@ -273,45 +273,67 @@ func (r *Resolver) resolveNameserverAddress(
 		childCtx.validation = validation
 	}
 
-	// Start from root hints and resolve iteratively. Try IPv4 roots first,
-	// then IPv6 roots so IPv6-only deployments still have a fallback when
-	// IPv4 transport is unavailable.
+	// Start from root hints and resolve iteratively. Keep IPv4 roots first for
+	// the usual case, but query all root addresses concurrently so a network
+	// that silently drops IPv4 packets can still use an IPv6 root promptly.
 	rootServers := r.rootServers()
 	if len(rootServers) == 0 {
 		return nil, errors.New("no root servers available")
 	}
 
-	// Query both address families. A nameserver may be IPv6-only.
-	var lastErr error
+	rootCtx, cancel := context.WithCancel(requestContext(ctx))
+	defer cancel()
+	type rootResult struct {
+		ips []net.IP
+		err error
+	}
+	results := make(chan rootResult, len(rootServers))
 	for _, rootNS := range rootServers {
-		var rootIPs []net.IP
-		for _, queryType := range []uint16{dns.TypeA, dns.TypeAAAA} {
-			if err := requestContext(ctx).Err(); err != nil {
-				return nil, err
-			}
-			msg := new(dns.Msg)
-			msg.SetQuestion(nsName, queryType)
-			msg.RecursionDesired = true
-			resp, err := r.doQueryWithContext(msg, rootNS, true, childCtx)
-			if err != nil {
-				lastErr = fmt.Errorf("query root %s for %s: %w", rootNS, nsName, err)
-				continue
-			}
-			if resp == nil {
-				lastErr = fmt.Errorf("received nil response for %s", nsName)
-				continue
-			}
-			for _, rr := range resp.Answer {
-				switch v := rr.(type) {
-				case *dns.A:
-					rootIPs = append(rootIPs, v.A)
-				case *dns.AAAA:
-					rootIPs = append(rootIPs, v.AAAA)
+		go func(rootNS string) {
+			rootChildCtx := *childCtx
+			rootChildCtx.requestCtx = rootCtx
+			var rootIPs []net.IP
+			var lastErr error
+			// Query both address families. A nameserver may be IPv6-only,
+			// and dual-stack glue is useful for transport failover.
+			for _, queryType := range []uint16{dns.TypeA, dns.TypeAAAA} {
+				if err := rootCtx.Err(); err != nil {
+					results <- rootResult{err: err}
+					return
+				}
+				msg := new(dns.Msg)
+				msg.SetQuestion(nsName, queryType)
+				msg.RecursionDesired = true
+				resp, err := r.doQueryWithContext(msg, rootNS, true, &rootChildCtx)
+				if err != nil {
+					lastErr = fmt.Errorf("query root %s for %s: %w", rootNS, nsName, err)
+					continue
+				}
+				if resp == nil {
+					lastErr = fmt.Errorf("received nil response for %s", nsName)
+					continue
+				}
+				for _, rr := range resp.Answer {
+					switch v := rr.(type) {
+					case *dns.A:
+						rootIPs = append(rootIPs, v.A)
+					case *dns.AAAA:
+						rootIPs = append(rootIPs, v.AAAA)
+					}
 				}
 			}
+			results <- rootResult{ips: rootIPs, err: lastErr}
+		}(rootNS)
+	}
+
+	var lastErr error
+	for range rootServers {
+		result := <-results
+		if len(result.ips) > 0 {
+			return result.ips, nil
 		}
-		if len(rootIPs) > 0 {
-			return rootIPs, nil
+		if result.err != nil {
+			lastErr = result.err
 		}
 	}
 

@@ -115,14 +115,40 @@ func (m *rootAnchorManager) load() {
 }
 
 func (m *rootAnchorManager) fetchRootDNSKEY(ctx context.Context) (*dns.Msg, error) {
-	address := m.resolver.getRandomRootServer()
-	if address == "" {
+	addresses := m.resolver.rootServers()
+	if len(addresses) == 0 {
 		return nil, errors.New("no root server available for trust-anchor refresh")
 	}
-	query := new(dns.Msg)
-	query.SetQuestion(".", dns.TypeDNSKEY)
-	return exchangeDNS(ctx, dnssecQuery(query), address,
-		time.Duration(m.config.Dns.QueryTimeoutMs)*time.Millisecond)
+	timeout := time.Duration(m.config.Dns.QueryTimeoutMs) * time.Millisecond
+	queryCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type result struct {
+		response *dns.Msg
+		err      error
+	}
+	results := make(chan result, len(addresses))
+	for _, address := range addresses {
+		go func(address string) {
+			query := new(dns.Msg)
+			query.SetQuestion(".", dns.TypeDNSKEY)
+			response, err := exchangeDNS(queryCtx, dnssecQuery(query), address, timeout)
+			results <- result{response: response, err: err}
+		}(address)
+	}
+	var errs []error
+	for range addresses {
+		result := <-results
+		if result.err == nil && result.response != nil {
+			return result.response, nil
+		}
+		if result.err != nil {
+			errs = append(errs, result.err)
+		}
+	}
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("all root servers failed: %w", errors.Join(errs...))
+	}
+	return nil, errors.New("all root servers returned empty responses")
 }
 
 func (m *rootAnchorManager) currentAnchors() []dns.RR {
