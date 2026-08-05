@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime/debug"
 )
 
 // Covenant types
@@ -191,7 +192,11 @@ func (c *GenericCovenant) CheckedCovenant() (ret Covenant, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			ret = nil
-			err = fmt.Errorf("malformed covenant: %v", recovered)
+			err = fmt.Errorf(
+				"malformed covenant: %v\n%s",
+				recovered,
+				debug.Stack(),
+			)
 		}
 	}()
 	return c.Covenant(), nil

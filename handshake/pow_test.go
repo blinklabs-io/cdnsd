@@ -132,7 +132,7 @@ func TestValidatePoWRejectsInvalidCompactTargets(t *testing.T) {
 		0x1d000000, // zero target
 		0x1d80ffff, // negative target
 		0x2200ffff, // target wider than 256 bits
-		0x04123400, // non-canonical representation
+		0x03001234, // non-canonical representation
 	} {
 		block.Header.Bits = bits
 		if err := block.ValidatePoW(); err == nil {

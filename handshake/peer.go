@@ -50,19 +50,47 @@ type Peer struct {
 // requested. Difficulty retarget validation still requires more chain history
 // than this peer retains; each header is nevertheless checked for a valid
 // compact target, PoW, and exact parent linkage.
+//
+//nolint:unused // Kept as a single-parent compatibility helper for tests.
 func validateHeaderChain(
 	headers []*BlockHeader,
 	previous [32]byte,
 ) error {
+	return validateHeaderChainFromLocators(headers, [][32]byte{previous})
+}
+
+func validateHeaderChainFromLocators(
+	headers []*BlockHeader,
+	locators [][32]byte,
+) error {
 	if len(headers) > maxBlockHeaders {
 		return fmt.Errorf("too many block headers: %d", len(headers))
 	}
-	expectedPrevious := previous
+	if len(headers) == 0 {
+		return nil
+	}
+	if headers[0] == nil {
+		return errors.New("header 0 is nil")
+	}
+	firstParentMatches := false
+	for _, locator := range locators {
+		if headers[0].PrevBlock == locator {
+			firstParentMatches = true
+			break
+		}
+	}
+	if !firstParentMatches {
+		return fmt.Errorf(
+			"header 0 PrevBlock %x does not match any locator",
+			headers[0].PrevBlock,
+		)
+	}
+	var expectedPrevious [32]byte
 	for idx, header := range headers {
 		if header == nil {
 			return fmt.Errorf("header %d is nil", idx)
 		}
-		if header.PrevBlock != expectedPrevious {
+		if idx > 0 && header.PrevBlock != expectedPrevious {
 			return fmt.Errorf(
 				"header %d PrevBlock %x does not match expected parent %x",
 				idx,
@@ -315,6 +343,9 @@ func (p *Peer) handshake() error {
 		case msg := <-p.handshakeCh:
 			switch msg := msg.(type) {
 			case *MsgVersion:
+				if versionReceived {
+					return errors.New("duplicate version message")
+				}
 				versionReceived = true
 				if !verackSent {
 					if err := p.sendMessage(MessageVerack, nil); err != nil {
@@ -323,6 +354,9 @@ func (p *Peer) handshake() error {
 					verackSent = true
 				}
 			case *MsgVerack:
+				if verackReceived {
+					return errors.New("duplicate verack message")
+				}
 				verackReceived = true
 			default:
 				return fmt.Errorf("unexpected message: %T", msg)
@@ -487,9 +521,9 @@ func (p *Peer) Sync(locator [][32]byte, syncFunc SyncFunc) error {
 					if len(nextLocator) == 0 {
 						return errors.New("sync locator is empty")
 					}
-					if err := validateHeaderChain(
+					if err := validateHeaderChainFromLocators(
 						msgHeaders.Headers,
-						nextLocator[0],
+						nextLocator,
 					); err != nil {
 						return fmt.Errorf("invalid header batch: %w", err)
 					}
