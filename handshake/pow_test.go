@@ -117,3 +117,26 @@ func TestValidatePoWBadBlock(t *testing.T) {
 		)
 	}
 }
+
+func TestValidatePoWRejectsInvalidCompactTargets(t *testing.T) {
+	blockBytes, err := hex.DecodeString(blockTestDefs[0].blockHex)
+	if err != nil {
+		t.Fatalf("unexpected error decoding hex: %s", err)
+	}
+	block, err := handshake.NewBlockFromReader(bytes.NewReader(blockBytes))
+	if err != nil {
+		t.Fatalf("unexpected error deserializing block: %s", err)
+	}
+
+	for _, bits := range []uint32{
+		0x1d000000, // zero target
+		0x1d80ffff, // negative target
+		0x2200ffff, // target wider than 256 bits
+		0x03001234, // non-canonical representation
+	} {
+		block.Header.Bits = bits
+		if err := block.ValidatePoW(); err == nil {
+			t.Errorf("ValidatePoW accepted invalid compact target 0x%08x", bits)
+		}
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime/debug"
 )
 
 // Covenant types
@@ -182,6 +183,23 @@ func (c *GenericCovenant) Covenant() Covenant {
 	default:
 		panic(fmt.Sprintf("unknown covenant type: %d", c.Type))
 	}
+}
+
+// CheckedCovenant converts a decoded covenant without panicking. Network
+// input must use this method so malformed covenant items fail closed instead
+// of taking down the process through Covenant's historical panic behavior.
+func (c *GenericCovenant) CheckedCovenant() (ret Covenant, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			ret = nil
+			err = fmt.Errorf(
+				"malformed covenant: %v\n%s",
+				recovered,
+				debug.Stack(),
+			)
+		}
+	}()
+	return c.Covenant(), nil
 }
 
 type NoneCovenant struct{}
