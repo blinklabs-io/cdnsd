@@ -8,6 +8,7 @@ package state
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"crypto/sha3"
 	"encoding/gob"
 	"encoding/json"
@@ -128,14 +129,16 @@ func (s *State) Close() error {
 	if gcStop != nil {
 		close(gcStop)
 	}
-	s.mu.Unlock()
 	if gcDone != nil {
 		<-gcDone
 	}
 	if db == nil {
+		s.mu.Unlock()
 		return nil
 	}
-	return db.Close()
+	err := db.Close()
+	s.mu.Unlock()
+	return err
 }
 
 func runGC(
@@ -200,43 +203,116 @@ func (s *State) update(fn func(*badger.Txn) error) error {
 	return s.db.Update(fn)
 }
 
-func compareFingerprint(db *badger.DB) error {
+type stateFingerprint struct {
+	Network          string           `json:"network"`
+	NetworkMagic     uint32           `json:"network_magic"`
+	Address          string           `json:"address"`
+	SocketPath       string           `json:"socket_path"`
+	InterceptHash    string           `json:"intercept_hash"`
+	InterceptSlot    uint64           `json:"intercept_slot"`
+	Verify           bool             `json:"verify"`
+	HandshakeAddress string           `json:"handshake_address"`
+	Profiles         []string         `json:"profiles"`
+	ProfileConfigs   []config.Profile `json:"profile_configs"`
+}
+
+func currentFingerprint() (string, error) {
 	cfg := config.GetConfig()
-	fingerprint := fmt.Sprintf(
-		"network=%s,network-magic=%d",
-		cfg.Indexer.Network,
-		cfg.Indexer.NetworkMagic,
-	)
-	err := db.Update(func(txn *badger.Txn) error {
-		item, err := txn.Get([]byte(fingerprintKey))
-		if err != nil {
-			if errors.Is(err, badger.ErrKeyNotFound) {
-				if err := txn.Set([]byte(fingerprintKey), []byte(fingerprint)); err != nil {
-					return err
-				}
-				return nil
-			} else {
-				return err
-			}
+	profileNames := slices.Clone(cfg.Profiles)
+	slices.Sort(profileNames)
+	profileConfigs := make([]config.Profile, 0, len(profileNames))
+	for _, profileName := range profileNames {
+		profile, ok := config.Profiles[profileName]
+		if !ok {
+			return "", fmt.Errorf("unknown configured profile %q", profileName)
 		}
-		err = item.Value(func(v []byte) error {
-			if string(v) != fingerprint {
-				return fmt.Errorf(
-					"config fingerprint in DB doesn't match current config: %s",
-					v,
-				)
-			}
-			return nil
-		})
-		if err != nil {
-			return err
-		}
-		return nil
-	})
+		profileConfigs = append(profileConfigs, profile)
+	}
+	fingerprintValue := stateFingerprint{
+		Network:          cfg.Indexer.Network,
+		NetworkMagic:     cfg.Indexer.NetworkMagic,
+		Address:          cfg.Indexer.Address,
+		SocketPath:       cfg.Indexer.SocketPath,
+		InterceptHash:    cfg.Indexer.InterceptHash,
+		InterceptSlot:    cfg.Indexer.InterceptSlot,
+		Verify:           cfg.Indexer.Verify,
+		HandshakeAddress: cfg.Indexer.HandshakeAddress,
+		Profiles:         profileNames,
+		ProfileConfigs:   profileConfigs,
+	}
+	payload, err := json.Marshal(fingerprintValue)
+	if err != nil {
+		return "", err
+	}
+	hash := sha256.Sum256(payload)
+	return fmt.Sprintf("sha256:%x", hash), nil
+}
+
+func compareFingerprint(db *badger.DB) error {
+	fingerprint, err := currentFingerprint()
 	if err != nil {
 		return err
 	}
-	return nil
+	var previous string
+	err = db.View(func(txn *badger.Txn) error {
+		item, err := txn.Get([]byte(fingerprintKey))
+		if err != nil {
+			return err
+		}
+		return item.Value(func(value []byte) error {
+			previous = string(value)
+			return nil
+		})
+	})
+	if errors.Is(err, badger.ErrKeyNotFound) {
+		return db.Update(func(txn *badger.Txn) error {
+			return txn.Set([]byte(fingerprintKey), []byte(fingerprint))
+		})
+	}
+	if err != nil {
+		return err
+	}
+	if previous == fingerprint {
+		return nil
+	}
+	slog.Warn(
+		"state source configuration changed; clearing derived index data",
+		"previous_fingerprint", previous,
+		"current_fingerprint", fingerprint,
+	)
+	if err := clearDerivedState(db); err != nil {
+		return err
+	}
+	return db.Update(func(txn *badger.Txn) error {
+		return txn.Set([]byte(fingerprintKey), []byte(fingerprint))
+	})
+}
+
+// clearDerivedState removes only state produced by an indexer source. It
+// intentionally leaves unrelated persisted state, such as DNSSEC anchors,
+// intact when the source configuration changes.
+func clearDerivedState(db *badger.DB) error {
+	if err := db.DropPrefix(
+		[]byte(cardanoRecordKeyPrefix),
+		[]byte(cardanoDomainKeyPrefix),
+		[]byte(handshakeNameHashKeyPrefix),
+		[]byte(handshakeDomainKeyPrefix),
+		[]byte(handshakeRecordKeyPrefix),
+	); err != nil {
+		return err
+	}
+	return db.Update(func(txn *badger.Txn) error {
+		for _, key := range []string{
+			chainsyncCursorKey,
+			discoveredAddrKey,
+			handshakeCursorKey,
+		} {
+			if err := txn.Delete([]byte(key)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (s *State) UpdateCursor(slotNumber uint64, blockHash string) error {
@@ -406,6 +482,10 @@ func (s *State) UpdateDomain(
 	domainName string,
 	records []DomainRecord,
 ) error {
+	domainName, records, err := normalizeDomainRecords(domainName, records)
+	if err != nil {
+		return err
+	}
 	return s.updateDomain(
 		domainName,
 		records,
@@ -415,6 +495,62 @@ func (s *State) UpdateDomain(
 	)
 }
 
+func normalizeDomainRecords(
+	domainName string,
+	records []DomainRecord,
+) (string, []DomainRecord, error) {
+	normalizedDomainName, err := normalizeStateName(domainName)
+	if err != nil {
+		return "", nil, fmt.Errorf("invalid domain name %q: %w", domainName, err)
+	}
+	domainName = normalizedDomainName
+	ret := make([]DomainRecord, 0, len(records))
+	for _, record := range records {
+		recordName, err := normalizeStateName(record.Lhs)
+		if err != nil {
+			return "", nil, fmt.Errorf("invalid record name %q: %w", record.Lhs, err)
+		}
+		if !stateNameWithinZone(recordName, domainName) {
+			return "", nil, fmt.Errorf(
+				"record name %q is outside domain %q",
+				record.Lhs,
+				domainName,
+			)
+		}
+		record.Lhs = recordName
+		record.Type = strings.ToUpper(strings.TrimSpace(record.Type))
+		if record.Type == "" || strings.ContainsAny(record.Type, " \t\r\n") {
+			return "", nil, fmt.Errorf("invalid record type %q", record.Type)
+		}
+		if record.Ttl < 0 {
+			return "", nil, fmt.Errorf("invalid negative TTL for record %q", recordName)
+		}
+		ret = append(ret, record)
+	}
+	return domainName, ret, nil
+}
+
+func normalizeStateName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	name = strings.TrimSuffix(name, ".")
+	if name == "" || strings.HasPrefix(name, ".") || strings.Contains(name, "..") {
+		return "", errors.New("name is empty or has an empty label")
+	}
+	if len(name) > 253 {
+		return "", errors.New("name is too long")
+	}
+	for _, label := range strings.Split(name, ".") {
+		if len(label) > 63 {
+			return "", errors.New("label is too long")
+		}
+	}
+	return strings.ToLower(name), nil
+}
+
+func stateNameWithinZone(name, zone string) bool {
+	return name == zone || strings.HasSuffix(name, "."+zone)
+}
+
 func (s *State) updateDomain(
 	domainName string,
 	records []DomainRecord,
@@ -422,15 +558,17 @@ func (s *State) updateDomain(
 	recordKeyPrefix string,
 	fromHandshake bool,
 ) error {
+	domainHash := sha256.Sum256([]byte(domainName))
 	err := s.update(func(txn *badger.Txn) error {
 		// Add new records
 		recordKeys := make([]string, 0)
 		for recordIdx, record := range records {
 			key := fmt.Sprintf(
-				"%s%s_%s_%d",
+				"%s%s_%s_%x_%d",
 				recordKeyPrefix,
 				strings.ToUpper(record.Type),
 				strings.Trim(record.Lhs, `.`),
+				domainHash[:8],
 				recordIdx,
 			)
 			recordKeys = append(recordKeys, key)
@@ -596,25 +734,30 @@ func (s *State) lookupRecordsInZone(
 				recordKeyPrefix,
 				strings.ToUpper(recordType),
 			)
-			it := txn.NewIterator(badger.DefaultIteratorOptions)
-			defer it.Close()
-			for it.Seek(keyPrefix); it.ValidForPrefix(keyPrefix); it.Next() {
-				item := it.Item()
-				val, err := item.ValueCopy(nil)
-				if err != nil {
-					return err
+			err := func() error {
+				it := txn.NewIterator(badger.DefaultIteratorOptions)
+				defer it.Close()
+				for it.Seek(keyPrefix); it.ValidForPrefix(keyPrefix); it.Next() {
+					item := it.Item()
+					val, err := item.ValueCopy(nil)
+					if err != nil {
+						return err
+					}
+					var record DomainRecord
+					if err := gob.NewDecoder(bytes.NewReader(val)).
+						Decode(&record); err != nil {
+						return err
+					}
+					name := strings.ToLower(strings.Trim(record.Lhs, "."))
+					if zone != "" && !stateNameWithinZone(name, zone) {
+						continue
+					}
+					ret = append(ret, record)
 				}
-				var record DomainRecord
-				if err := gob.NewDecoder(bytes.NewReader(val)).
-					Decode(&record); err != nil {
-					return err
-				}
-				name := strings.ToLower(strings.Trim(record.Lhs, "."))
-				if zone != "" && name != zone &&
-					!strings.HasSuffix(name, "."+zone) {
-					continue
-				}
-				ret = append(ret, record)
+				return nil
+			}()
+			if err != nil {
+				return err
 			}
 		}
 		return nil
@@ -634,7 +777,7 @@ func (s *State) lookupRecords(
 	recordKeyPrefix string,
 ) ([]DomainRecord, error) {
 	ret := []DomainRecord{}
-	recordName = strings.Trim(recordName, `.`)
+	recordName = strings.ToLower(strings.Trim(recordName, `.`))
 	err := s.view(func(txn *badger.Txn) error {
 		for _, recordType := range recordTypes {
 			keyPrefix := fmt.Appendf(
@@ -645,27 +788,30 @@ func (s *State) lookupRecords(
 				recordName,
 			)
 
-			it := txn.NewIterator(badger.DefaultIteratorOptions)
-			defer it.Close()
-			for it.Seek(keyPrefix); it.ValidForPrefix(keyPrefix); it.Next() {
-				item := it.Item()
-				// Skip keys that don't have a purely numeric suffix
-				// This means that they don't belong to the domain we are looking for
-				keySuffix := item.Key()[len(keyPrefix):]
-				if _, err := strconv.Atoi(string(keySuffix)); err != nil {
-					continue
+			err := func() error {
+				it := txn.NewIterator(badger.DefaultIteratorOptions)
+				defer it.Close()
+				for it.Seek(keyPrefix); it.ValidForPrefix(keyPrefix); it.Next() {
+					item := it.Item()
+					val, err := item.ValueCopy(nil)
+					if err != nil {
+						return err
+					}
+					gobBuf := bytes.NewReader(val)
+					gobDec := gob.NewDecoder(gobBuf)
+					var tmpRecord DomainRecord
+					if err := gobDec.Decode(&tmpRecord); err != nil {
+						return err
+					}
+					if strings.ToLower(strings.Trim(tmpRecord.Lhs, ".")) != recordName {
+						continue
+					}
+					ret = append(ret, tmpRecord)
 				}
-				val, err := item.ValueCopy(nil)
-				if err != nil {
-					return err
-				}
-				gobBuf := bytes.NewReader(val)
-				gobDec := gob.NewDecoder(gobBuf)
-				var tmpRecord DomainRecord
-				if err := gobDec.Decode(&tmpRecord); err != nil {
-					return err
-				}
-				ret = append(ret, tmpRecord)
+				return nil
+			}()
+			if err != nil {
+				return err
 			}
 		}
 		return nil
@@ -775,6 +921,10 @@ func (s *State) UpdateHandshakeDomain(
 	domainName string,
 	records []DomainRecord,
 ) error {
+	domainName, records, err := normalizeDomainRecords(domainName, records)
+	if err != nil {
+		return err
+	}
 	return s.updateDomain(
 		domainName,
 		records,

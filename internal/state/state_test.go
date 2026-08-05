@@ -7,9 +7,11 @@
 package state
 
 import (
+	"crypto/sha3"
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -252,6 +254,171 @@ func TestAddDiscoveredAddressDedupeAddressPolicyTLD(t *testing.T) {
 	expected = []DiscoveredAddress{addr, sameAddressDifferentTLD, newAddr}
 	if !reflect.DeepEqual(got, expected) {
 		t.Fatalf("unexpected deduped addresses: got %#v expected %#v", got, expected)
+	}
+}
+
+func TestUpdateDomainRejectsOutOfZoneRecordsAtomically(t *testing.T) {
+	s := newLoadedTestState(t)
+	safe := DomainRecord{
+		Lhs:  "www.example",
+		Type: "A",
+		Ttl:  60,
+		Rhs:  "192.0.2.1",
+	}
+	if err := s.UpdateDomain("example.", []DomainRecord{safe}); err != nil {
+		t.Fatalf("failed to add safe record: %v", err)
+	}
+	if err := s.UpdateDomain("example.", []DomainRecord{
+		{
+			Lhs:  "notexample.",
+			Type: "A",
+			Rhs:  "192.0.2.2",
+		},
+	}); err == nil {
+		t.Fatal("expected out-of-zone record to be rejected")
+	}
+	got, err := s.LookupRecords([]string{"A"}, "www.example.")
+	if err != nil {
+		t.Fatalf("failed to look up safe record: %v", err)
+	}
+	if !reflect.DeepEqual(got, []DomainRecord{safe}) {
+		t.Fatalf("rejected update changed published state: got %#v", got)
+	}
+}
+
+func TestUpdateDomainSeparatesSharedRecordNamesAcrossZones(t *testing.T) {
+	s := newLoadedTestState(t)
+	first := DomainRecord{
+		Lhs:  "shared.example",
+		Type: "A",
+		Rhs:  "192.0.2.1",
+	}
+	second := DomainRecord{
+		Lhs:  "shared.example",
+		Type: "A",
+		Rhs:  "192.0.2.2",
+	}
+	if err := s.UpdateDomain("example", []DomainRecord{first}); err != nil {
+		t.Fatalf("failed to add first shared record: %v", err)
+	}
+	if err := s.UpdateDomain("shared.example", []DomainRecord{second}); err != nil {
+		t.Fatalf("failed to add second shared record: %v", err)
+	}
+	got, err := s.LookupRecords([]string{"A"}, "shared.example")
+	if err != nil {
+		t.Fatalf("failed to look up shared records: %v", err)
+	}
+	if !slices.ContainsFunc(got, func(record DomainRecord) bool {
+		return record.Rhs == first.Rhs
+	}) || !slices.ContainsFunc(got, func(record DomainRecord) bool {
+		return record.Rhs == second.Rhs
+	}) {
+		t.Fatalf("shared records were not kept separate: %#v", got)
+	}
+}
+
+func TestStateNameWithinZoneUsesLabelBoundaries(t *testing.T) {
+	if !stateNameWithinZone("www.alice.cardano", "alice.cardano") {
+		t.Fatal("expected descendant name to be in zone")
+	}
+	if stateNameWithinZone("notalice.cardano", "alice.cardano") {
+		t.Fatal("sibling name must not be considered in zone")
+	}
+}
+
+func TestLoadClearsDerivedStateWhenProfileChanges(t *testing.T) {
+	cfg := config.GetConfig()
+	oldStateDirectory := cfg.State.Directory
+	oldIndexer := cfg.Indexer
+	oldProfiles := slices.Clone(cfg.Profiles)
+	t.Cleanup(func() {
+		cfg.State.Directory = oldStateDirectory
+		cfg.Indexer = oldIndexer
+		cfg.Profiles = oldProfiles
+	})
+
+	cfg.State.Directory = t.TempDir()
+	cfg.Indexer.Network = "preprod"
+	cfg.Indexer.NetworkMagic = 0
+	cfg.Indexer.Address = ""
+	cfg.Indexer.SocketPath = ""
+	cfg.Indexer.InterceptHash = "old-intercept"
+	cfg.Indexer.InterceptSlot = 1
+	cfg.Indexer.HandshakeAddress = "old-handshake"
+	cfg.Indexer.Verify = true
+	cfg.Profiles = []string{"ada-preprod"}
+
+	first := &State{}
+	if err := first.Load(); err != nil {
+		t.Fatalf("failed to load initial state: %v", err)
+	}
+	if err := first.UpdateCursor(10, "old-block"); err != nil {
+		t.Fatalf("failed to persist cursor: %v", err)
+	}
+	if err := first.AddDiscoveredAddress(DiscoveredAddress{
+		Address:  "old-address",
+		TldName:  "old",
+		PolicyId: "old-policy",
+	}); err != nil {
+		t.Fatalf("failed to persist discovered address: %v", err)
+	}
+	if err := first.UpdateDomain("old.example", []DomainRecord{{
+		Lhs: "old.example", Type: "A", Rhs: "192.0.2.1",
+	}}); err != nil {
+		t.Fatalf("failed to persist domain: %v", err)
+	}
+	if err := first.UpdateHandshakeCursor("old-handshake-block"); err != nil {
+		t.Fatalf("failed to persist handshake cursor: %v", err)
+	}
+	if err := first.AddHandshakeName("old-handshake-name"); err != nil {
+		t.Fatalf("failed to persist handshake name: %v", err)
+	}
+	if err := first.UpdateHandshakeDomain("old-handshake-name", []DomainRecord{{
+		Lhs: "old-handshake-name", Type: "TXT", Rhs: `"old"`,
+	}}); err != nil {
+		t.Fatalf("failed to persist handshake domain: %v", err)
+	}
+	if err := first.SetDNSSECRootAnchorState([]byte("preserve-me")); err != nil {
+		t.Fatalf("failed to persist unrelated state: %v", err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("failed to close initial state: %v", err)
+	}
+
+	cfg.Profiles = []string{"auto-preprod"}
+	second := &State{}
+	if err := second.Load(); err != nil {
+		t.Fatalf("profile change should rotate derived state, got: %v", err)
+	}
+	t.Cleanup(func() { _ = second.Close() })
+	if slot, hash, err := second.GetCursor(); err != nil {
+		t.Fatalf("failed to read rotated cursor: %v", err)
+	} else if slot != 0 || hash != "" {
+		t.Fatalf("stale cursor survived profile change: %d, %q", slot, hash)
+	}
+	if got, err := second.GetDiscoveredAddresses(); err != nil {
+		t.Fatalf("failed to read discovered addresses: %v", err)
+	} else if len(got) != 0 {
+		t.Fatalf("stale discovered addresses survived profile change: %#v", got)
+	}
+	if got, err := second.LookupRecords([]string{"A"}, "old.example"); err != nil {
+		t.Fatalf("failed to read rotated domain state: %v", err)
+	} else if len(got) != 0 {
+		t.Fatalf("stale domain records survived profile change: %#v", got)
+	}
+	if got, err := second.GetHandshakeCursor(); err != nil {
+		t.Fatalf("failed to read rotated handshake cursor: %v", err)
+	} else if got != "" {
+		t.Fatalf("stale handshake cursor survived profile change: %q", got)
+	}
+	oldNameHash := sha3.Sum256([]byte("old-handshake-name"))
+	if _, err := second.GetHandshakeNameByHash(oldNameHash[:]); !errors.Is(err, badger.ErrKeyNotFound) {
+		t.Fatalf("stale handshake name survived profile change: %v", err)
+	}
+	if got, err := second.GetDNSSECRootAnchorState(); err != nil {
+		t.Fatalf("failed to read unrelated state: %v", err)
+	} else if string(got) != "preserve-me" {
+		t.Fatalf("unrelated state was cleared: %q", got)
 	}
 }
 
