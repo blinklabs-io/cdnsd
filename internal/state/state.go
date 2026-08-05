@@ -244,72 +244,66 @@ func compareFingerprint(db *badger.DB) error {
 	if err != nil {
 		return err
 	}
-	err = db.Update(func(txn *badger.Txn) error {
+	var previous string
+	err = db.View(func(txn *badger.Txn) error {
 		item, err := txn.Get([]byte(fingerprintKey))
-		if err != nil {
-			if errors.Is(err, badger.ErrKeyNotFound) {
-				if err := txn.Set([]byte(fingerprintKey), []byte(fingerprint)); err != nil {
-					return err
-				}
-				return nil
-			} else {
-				return err
-			}
-		}
-		err = item.Value(func(v []byte) error {
-			if string(v) == fingerprint {
-				return nil
-			}
-			slog.Warn(
-				"state source configuration changed; clearing derived index data",
-				"previous_fingerprint", string(v),
-				"current_fingerprint", fingerprint,
-			)
-			return clearDerivedState(txn)
-		})
 		if err != nil {
 			return err
 		}
+		return item.Value(func(value []byte) error {
+			previous = string(value)
+			return nil
+		})
+	})
+	if errors.Is(err, badger.ErrKeyNotFound) {
+		return db.Update(func(txn *badger.Txn) error {
+			return txn.Set([]byte(fingerprintKey), []byte(fingerprint))
+		})
+	}
+	if err != nil {
+		return err
+	}
+	if previous == fingerprint {
+		return nil
+	}
+	slog.Warn(
+		"state source configuration changed; clearing derived index data",
+		"previous_fingerprint", previous,
+		"current_fingerprint", fingerprint,
+	)
+	if err := clearDerivedState(db); err != nil {
+		return err
+	}
+	return db.Update(func(txn *badger.Txn) error {
 		return txn.Set([]byte(fingerprintKey), []byte(fingerprint))
 	})
-	return err
 }
 
 // clearDerivedState removes only state produced by an indexer source. It
 // intentionally leaves unrelated persisted state, such as DNSSEC anchors,
 // intact when the source configuration changes.
-func clearDerivedState(txn *badger.Txn) error {
-	for _, key := range []string{
-		chainsyncCursorKey,
-		discoveredAddrKey,
-		handshakeCursorKey,
-	} {
-		if err := txn.Delete([]byte(key)); err != nil {
-			return err
-		}
+func clearDerivedState(db *badger.DB) error {
+	if err := db.DropPrefix(
+		[]byte(cardanoRecordKeyPrefix),
+		[]byte(cardanoDomainKeyPrefix),
+		[]byte(handshakeNameHashKeyPrefix),
+		[]byte(handshakeDomainKeyPrefix),
+		[]byte(handshakeRecordKeyPrefix),
+	); err != nil {
+		return err
 	}
-	for _, prefix := range []string{
-		cardanoRecordKeyPrefix,
-		cardanoDomainKeyPrefix,
-		handshakeNameHashKeyPrefix,
-		handshakeDomainKeyPrefix,
-		handshakeRecordKeyPrefix,
-	} {
-		var keys [][]byte
-		iteratorOptions := badger.DefaultIteratorOptions
-		iteratorOptions.PrefetchValues = false
-		it := txn.NewIterator(iteratorOptions)
-		for it.Seek([]byte(prefix)); it.ValidForPrefix([]byte(prefix)); it.Next() {
-			keys = append(keys, it.Item().KeyCopy(nil))
-		}
-		it.Close()
-		for _, key := range keys {
-			if err := txn.Delete(key); err != nil {
+	return db.Update(func(txn *badger.Txn) error {
+		for _, key := range []string{
+			chainsyncCursorKey,
+			discoveredAddrKey,
+			handshakeCursorKey,
+		} {
+			if err := txn.Delete([]byte(key)); err != nil {
 				return err
 			}
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
 func (s *State) UpdateCursor(slotNumber uint64, blockHash string) error {
@@ -495,10 +489,11 @@ func normalizeDomainRecords(
 	domainName string,
 	records []DomainRecord,
 ) (string, []DomainRecord, error) {
-	domainName, err := normalizeStateName(domainName)
+	normalizedDomainName, err := normalizeStateName(domainName)
 	if err != nil {
 		return "", nil, fmt.Errorf("invalid domain name %q: %w", domainName, err)
 	}
+	domainName = normalizedDomainName
 	ret := make([]DomainRecord, 0, len(records))
 	for _, record := range records {
 		recordName, err := normalizeStateName(record.Lhs)
@@ -661,25 +656,31 @@ func (s *State) lookupRecordsInZone(
 				recordKeyPrefix,
 				strings.ToUpper(recordType),
 			)
-			it := txn.NewIterator(badger.DefaultIteratorOptions)
-			for it.Seek(keyPrefix); it.ValidForPrefix(keyPrefix); it.Next() {
-				item := it.Item()
-				val, err := item.ValueCopy(nil)
-				if err != nil {
-					return err
+			err := func() error {
+				it := txn.NewIterator(badger.DefaultIteratorOptions)
+				defer it.Close()
+				for it.Seek(keyPrefix); it.ValidForPrefix(keyPrefix); it.Next() {
+					item := it.Item()
+					val, err := item.ValueCopy(nil)
+					if err != nil {
+						return err
+					}
+					var record DomainRecord
+					if err := gob.NewDecoder(bytes.NewReader(val)).
+						Decode(&record); err != nil {
+						return err
+					}
+					name := strings.ToLower(strings.Trim(record.Lhs, "."))
+					if zone != "" && !stateNameWithinZone(name, zone) {
+						continue
+					}
+					ret = append(ret, record)
 				}
-				var record DomainRecord
-				if err := gob.NewDecoder(bytes.NewReader(val)).
-					Decode(&record); err != nil {
-					return err
-				}
-				name := strings.ToLower(strings.Trim(record.Lhs, "."))
-				if zone != "" && !stateNameWithinZone(name, zone) {
-					continue
-				}
-				ret = append(ret, record)
+				return nil
+			}()
+			if err != nil {
+				return err
 			}
-			it.Close()
 		}
 		return nil
 	})
@@ -709,26 +710,31 @@ func (s *State) lookupRecords(
 				recordName,
 			)
 
-			it := txn.NewIterator(badger.DefaultIteratorOptions)
-			defer it.Close()
-			for it.Seek(keyPrefix); it.ValidForPrefix(keyPrefix); it.Next() {
-				item := it.Item()
-				val, err := item.ValueCopy(nil)
-				if err != nil {
-					return err
+			err := func() error {
+				it := txn.NewIterator(badger.DefaultIteratorOptions)
+				defer it.Close()
+				for it.Seek(keyPrefix); it.ValidForPrefix(keyPrefix); it.Next() {
+					item := it.Item()
+					val, err := item.ValueCopy(nil)
+					if err != nil {
+						return err
+					}
+					gobBuf := bytes.NewReader(val)
+					gobDec := gob.NewDecoder(gobBuf)
+					var tmpRecord DomainRecord
+					if err := gobDec.Decode(&tmpRecord); err != nil {
+						return err
+					}
+					if strings.ToLower(strings.Trim(tmpRecord.Lhs, ".")) != recordName {
+						continue
+					}
+					ret = append(ret, tmpRecord)
 				}
-				gobBuf := bytes.NewReader(val)
-				gobDec := gob.NewDecoder(gobBuf)
-				var tmpRecord DomainRecord
-				if err := gobDec.Decode(&tmpRecord); err != nil {
-					return err
-				}
-				if strings.ToLower(strings.Trim(tmpRecord.Lhs, ".")) != recordName {
-					continue
-				}
-				ret = append(ret, tmpRecord)
+				return nil
+			}()
+			if err != nil {
+				return err
 			}
-			it.Close()
 		}
 		return nil
 	})

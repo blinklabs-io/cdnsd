@@ -233,6 +233,37 @@ func TestUpdateDomainRejectsOutOfZoneRecordsAtomically(t *testing.T) {
 	}
 }
 
+func TestUpdateDomainSeparatesSharedRecordNamesAcrossZones(t *testing.T) {
+	s := newLoadedTestState(t)
+	first := DomainRecord{
+		Lhs:  "shared.example",
+		Type: "A",
+		Rhs:  "192.0.2.1",
+	}
+	second := DomainRecord{
+		Lhs:  "shared.example",
+		Type: "A",
+		Rhs:  "192.0.2.2",
+	}
+	if err := s.UpdateDomain("example", []DomainRecord{first}); err != nil {
+		t.Fatalf("failed to add first shared record: %v", err)
+	}
+	if err := s.UpdateDomain("shared.example", []DomainRecord{second}); err != nil {
+		t.Fatalf("failed to add second shared record: %v", err)
+	}
+	got, err := s.LookupRecords([]string{"A"}, "shared.example")
+	if err != nil {
+		t.Fatalf("failed to look up shared records: %v", err)
+	}
+	if !slices.ContainsFunc(got, func(record DomainRecord) bool {
+		return record.Rhs == first.Rhs
+	}) || !slices.ContainsFunc(got, func(record DomainRecord) bool {
+		return record.Rhs == second.Rhs
+	}) {
+		t.Fatalf("shared records were not kept separate: %#v", got)
+	}
+}
+
 func TestStateNameWithinZoneUsesLabelBoundaries(t *testing.T) {
 	if !stateNameWithinZone("www.alice.cardano", "alice.cardano") {
 		t.Fatal("expected descendant name to be in zone")

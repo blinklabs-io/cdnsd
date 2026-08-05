@@ -7,6 +7,7 @@
 package indexer
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -53,6 +54,10 @@ func TestValidateAndConvertRecordsRejectsUnsafeData(t *testing.T) {
 		{
 			name:   "unsupported type",
 			record: validRecord("NOT-A-DNS-TYPE", "alice.cardano.", "value"),
+		},
+		{
+			name:   "unsupported meta type",
+			record: validRecord("ANY", "alice.cardano.", ""),
 		},
 		{
 			name:   "malformed address",
@@ -102,8 +107,50 @@ func TestValidateAndConvertRecordsRejectsUnsafeData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("valid records rejected: %v", err)
 	}
-	if len(records) != 2 || !strings.EqualFold(records[0].Type, "A") {
+	if len(records) != 2 || records[0].Type != "A" || records[1].Type != "AAAA" {
 		t.Fatalf("unexpected converted records: %#v", records)
+	}
+
+	if _, err := validateAndConvertRecords(".", nil); err == nil {
+		t.Fatal("root domain should be rejected")
+	}
+	if _, err := validateAndConvertRecords(
+		"alice.cardano.",
+		[]models.CardanoDnsDomainRecord{validRecord("A", "", "192.0.2.1")},
+	); err == nil {
+		t.Fatal("empty record owner should be rejected")
+	}
+	if _, err := validateAndConvertRecords(
+		"alice.cardano.",
+		[]models.CardanoDnsDomainRecord{validRecord("TXT", "alice.cardano.", "line\r\nbreak")},
+	); err == nil {
+		t.Fatal("record data containing a line break should be rejected")
+	}
+	if _, err := validateAndConvertRecords(
+		"alice.cardano.",
+		[]models.CardanoDnsDomainRecord{validRecord(
+			"DS", "alice.cardano.", "12345 8 2 00",
+		)},
+	); err == nil || !strings.Contains(err.Error(), "DS digest has length") {
+		t.Fatalf("wrong-length DS digest error = %v", err)
+	}
+	if _, err := validateAndConvertRecords(
+		"alice.cardano.",
+		[]models.CardanoDnsDomainRecord{validRecord(
+			"NSEC3", "alice.cardano.", "1 0 0 - ABCD A",
+		)},
+	); err == nil || !strings.Contains(err.Error(), "NSEC3 next owner hash has length") {
+		t.Fatalf("wrong-length NSEC3 hash error = %v", err)
+	}
+	ttlRecord := validRecord("A", "alice.cardano.", "192.0.2.1")
+	ttlRecord.Ttl = models.NewCardanoDnsMaybe[models.CardanoDnsTtl](
+		models.CardanoDnsTtl(math.MaxInt32 + 1),
+	)
+	if _, err := validateAndConvertRecords(
+		"alice.cardano.",
+		[]models.CardanoDnsDomainRecord{ttlRecord},
+	); err == nil {
+		t.Fatal("TTL above the DNS wire limit should be rejected")
 	}
 
 	quotedComment, err := validateAndConvertRecords(
