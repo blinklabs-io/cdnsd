@@ -35,6 +35,16 @@ type dnssecValidation struct {
 	insecure bool
 }
 
+func (v *dnssecValidation) clone() *dnssecValidation {
+	if v == nil {
+		return nil
+	}
+	clone := *v
+	clone.anchors = slices.Clone(v.anchors)
+	clone.keys = slices.Clone(v.keys)
+	return &clone
+}
+
 func (r *Resolver) loadTrustAnchors(cfg *config.Config) error {
 	r.trustAnchors = make(map[string][]dns.RR)
 	if !cfg.Dns.DNSSEC.Enabled {

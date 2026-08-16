@@ -291,6 +291,7 @@ func (r *Resolver) resolveNameserverAddress(
 	for _, rootNS := range rootServers {
 		go func(rootNS string) {
 			rootChildCtx := *childCtx
+			rootChildCtx.validation = childCtx.validation.clone()
 			rootChildCtx.requestCtx = rootCtx
 			var rootIPs []net.IP
 			var lastErr error
