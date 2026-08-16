@@ -926,7 +926,7 @@ func writeFormatError(w dns.ResponseWriter, r *dns.Msg) {
 func stateRecordToDnsRR(record state.DomainRecord) (dns.RR, error) {
 	tmpTtl := ""
 	if record.Ttl > 0 {
-		tmpTtl = strconv.Itoa(record.Ttl)
+		tmpTtl = strconv.FormatInt(record.Ttl, 10)
 	}
 	tmpRR := fmt.Sprintf(
 		"%s %s IN %s %s",

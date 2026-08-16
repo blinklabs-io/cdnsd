@@ -56,7 +56,7 @@ type State struct {
 type DomainRecord struct {
 	Lhs  string
 	Type string
-	Ttl  int
+	Ttl  int64
 	Rhs  string
 }
 

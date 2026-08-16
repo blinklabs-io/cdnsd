@@ -464,12 +464,12 @@ func validateAndConvertRecords(
 		if containsUnquotedComment(string(record.Rhs)) {
 			return nil, errors.New("indexed record data contains a zone-file comment")
 		}
-		ttl := 0
+		ttl := int64(0)
 		if record.Ttl.HasValue() {
 			if record.Ttl.Value > math.MaxUint32 {
 				return nil, errors.New("record ttl value out of bounds")
 			}
-			ttl = int(record.Ttl.Value) // #nosec G115
+			ttl = int64(record.Ttl.Value)
 		}
 		rr, err := dns.NewRR(fmt.Sprintf(
 			"%s %d IN %s %s",
