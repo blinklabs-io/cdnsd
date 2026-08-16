@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"runtime/debug"
 )
 
 // Covenant types
@@ -63,143 +62,42 @@ func (c *GenericCovenant) Decode(r io.Reader) error {
 	return nil
 }
 
-func (c *GenericCovenant) Covenant() Covenant {
+func (c *GenericCovenant) Covenant() (Covenant, error) {
 	switch c.Type {
 	case CovenantTypeNone:
-		ret, err := NewNoneCovenantFromGeneric(c)
-		if err != nil {
-			panic(
-				fmt.Sprintf("can't convert generic covenant to None: %s", err),
-			)
-		}
-		return ret
+		return NewNoneCovenantFromGeneric(c)
 	case CovenantTypeClaim:
-		ret, err := NewClaimCovenantFromGeneric(c)
-		if err != nil {
-			panic(
-				fmt.Sprintf("can't convert generic covenant to Claim: %s", err),
-			)
-		}
-		return ret
+		return NewClaimCovenantFromGeneric(c)
 	case CovenantTypeOpen:
-		ret, err := NewOpenCovenantFromGeneric(c)
-		if err != nil {
-			panic(
-				fmt.Sprintf("can't convert generic covenant to Open: %s", err),
-			)
-		}
-		return ret
+		return NewOpenCovenantFromGeneric(c)
 	case CovenantTypeBid:
-		ret, err := NewBidCovenantFromGeneric(c)
-		if err != nil {
-			panic(fmt.Sprintf("can't convert generic covenant to Bid: %s", err))
-		}
-		return ret
+		return NewBidCovenantFromGeneric(c)
 	case CovenantTypeReveal:
-		ret, err := NewRevealCovenantFromGeneric(c)
-		if err != nil {
-			panic(
-				fmt.Sprintf(
-					"can't convert generic covenant to Reveal: %s",
-					err,
-				),
-			)
-		}
-		return ret
+		return NewRevealCovenantFromGeneric(c)
 	case CovenantTypeRedeem:
-		ret, err := NewRedeemCovenantFromGeneric(c)
-		if err != nil {
-			panic(
-				fmt.Sprintf(
-					"can't convert generic covenant to Redeem: %s",
-					err,
-				),
-			)
-		}
-		return ret
+		return NewRedeemCovenantFromGeneric(c)
 	case CovenantTypeRegister:
-		ret, err := NewRegisterCovenantFromGeneric(c)
-		if err != nil {
-			panic(
-				fmt.Sprintf(
-					"can't convert generic covenant to Register: %s",
-					err,
-				),
-			)
-		}
-		return ret
+		return NewRegisterCovenantFromGeneric(c)
 	case CovenantTypeUpdate:
-		ret, err := NewUpdateCovenantFromGeneric(c)
-		if err != nil {
-			panic(
-				fmt.Sprintf(
-					"can't convert generic covenant to Update: %s",
-					err,
-				),
-			)
-		}
-		return ret
+		return NewUpdateCovenantFromGeneric(c)
 	case CovenantTypeRenew:
-		ret, err := NewRenewCovenantFromGeneric(c)
-		if err != nil {
-			panic(
-				fmt.Sprintf("can't convert generic covenant to Renew: %s", err),
-			)
-		}
-		return ret
+		return NewRenewCovenantFromGeneric(c)
 	case CovenantTypeTransfer:
-		ret, err := NewTransferCovenantFromGeneric(c)
-		if err != nil {
-			panic(
-				fmt.Sprintf(
-					"can't convert generic covenant to Transfer: %s",
-					err,
-				),
-			)
-		}
-		return ret
+		return NewTransferCovenantFromGeneric(c)
 	case CovenantTypeFinalize:
-		ret, err := NewFinalizeCovenantFromGeneric(c)
-		if err != nil {
-			panic(
-				fmt.Sprintf(
-					"can't convert generic covenant to Finalize: %s",
-					err,
-				),
-			)
-		}
-		return ret
+		return NewFinalizeCovenantFromGeneric(c)
 	case CovenantTypeRevoke:
-		ret, err := NewRevokeCovenantFromGeneric(c)
-		if err != nil {
-			panic(
-				fmt.Sprintf(
-					"can't convert generic covenant to Revoke: %s",
-					err,
-				),
-			)
-		}
-		return ret
+		return NewRevokeCovenantFromGeneric(c)
 	default:
-		panic(fmt.Sprintf("unknown covenant type: %d", c.Type))
+		return nil, fmt.Errorf("unknown covenant type: %d", c.Type)
 	}
 }
 
-// CheckedCovenant converts a decoded covenant without panicking. Network
-// input must use this method so malformed covenant items fail closed instead
-// of taking down the process through Covenant's historical panic behavior.
-func (c *GenericCovenant) CheckedCovenant() (ret Covenant, err error) {
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			ret = nil
-			err = fmt.Errorf(
-				"malformed covenant: %v\n%s",
-				recovered,
-				debug.Stack(),
-			)
-		}
-	}()
-	return c.Covenant(), nil
+// CheckedCovenant converts a decoded covenant and returns malformed input as
+// an error. Network input must use this method so malformed covenant items
+// fail closed.
+func (c *GenericCovenant) CheckedCovenant() (Covenant, error) {
+	return c.Covenant()
 }
 
 type NoneCovenant struct{}

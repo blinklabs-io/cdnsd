@@ -7,13 +7,15 @@
 package handshake
 
 type Network struct {
-	Name        string
-	Magic       uint32
-	GenesisHash string
+	Name         string
+	Magic        uint32
+	GenesisHash  string
+	PowLimitBits uint32
 }
 
 var NetworkMainnet = Network{
-	Name:        "mainnet",
-	Magic:       1533997779,
-	GenesisHash: "5b6ef2d3c1f3cdcadfd9a030ba1811efdd17740f14e166489760741d075992e0",
+	Name:         "mainnet",
+	Magic:        1533997779,
+	GenesisHash:  "5b6ef2d3c1f3cdcadfd9a030ba1811efdd17740f14e166489760741d075992e0",
+	PowLimitBits: 0x1c00ffff,
 }

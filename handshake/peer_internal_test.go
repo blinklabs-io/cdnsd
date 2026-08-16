@@ -25,3 +25,12 @@ func TestValidateHeaderChainRejectsNilHeader(t *testing.T) {
 		t.Fatal("validateHeaderChain accepted a nil header")
 	}
 }
+
+func TestValidateHeaderChainRejectsTargetAboveNetworkLimit(t *testing.T) {
+	if err := validateHeaderChain(
+		[]*BlockHeader{{Bits: 0x1d00ffff}},
+		[32]byte{},
+	); err == nil {
+		t.Fatal("validateHeaderChain accepted a target above the network limit")
+	}
+}

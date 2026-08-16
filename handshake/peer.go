@@ -18,6 +18,8 @@ import (
 	"time"
 )
 
+var errHeaderChainDoesNotExtend = errors.New("header batch does not extend current locator")
+
 const (
 	dialTimeout        = 5 * time.Second
 	peerRequestTimeout = 5 * time.Second
@@ -50,18 +52,21 @@ type Peer struct {
 // requested. Difficulty retarget validation still requires more chain history
 // than this peer retains; each header is nevertheless checked for a valid
 // compact target, PoW, and exact parent linkage.
-//
-//nolint:unused // Kept as a single-parent compatibility helper for tests.
 func validateHeaderChain(
 	headers []*BlockHeader,
 	previous [32]byte,
 ) error {
-	return validateHeaderChainFromLocators(headers, [][32]byte{previous})
+	return validateHeaderChainFromLocators(
+		headers,
+		[][32]byte{previous},
+		NetworkMainnet.PowLimitBits,
+	)
 }
 
 func validateHeaderChainFromLocators(
 	headers []*BlockHeader,
 	locators [][32]byte,
+	powLimitBits uint32,
 ) error {
 	if len(headers) > maxBlockHeaders {
 		return fmt.Errorf("too many block headers: %d", len(headers))
@@ -81,9 +86,14 @@ func validateHeaderChainFromLocators(
 	}
 	if !firstParentMatches {
 		return fmt.Errorf(
-			"header 0 PrevBlock %x does not match any locator",
+			"%w: header 0 PrevBlock %x does not match any locator",
+			errHeaderChainDoesNotExtend,
 			headers[0].PrevBlock,
 		)
+	}
+	powLimit, err := CompactToTargetChecked(powLimitBits)
+	if err != nil {
+		return fmt.Errorf("invalid network PoW limit 0x%08x: %w", powLimitBits, err)
 	}
 	var expectedPrevious [32]byte
 	for idx, header := range headers {
@@ -97,6 +107,13 @@ func validateHeaderChainFromLocators(
 				header.PrevBlock,
 				expectedPrevious,
 			)
+		}
+		headerTarget, err := CompactToTargetChecked(header.Bits)
+		if err != nil {
+			return fmt.Errorf("header %d has invalid target: %w", idx, err)
+		}
+		if headerTarget.Cmp(powLimit) > 0 {
+			return fmt.Errorf("header %d target exceeds network PoW limit", idx)
 		}
 		if err := header.ValidatePoW(); err != nil {
 			return fmt.Errorf("header %d PoW validation failed: %w", idx, err)
@@ -524,7 +541,12 @@ func (p *Peer) Sync(locator [][32]byte, syncFunc SyncFunc) error {
 					if err := validateHeaderChainFromLocators(
 						msgHeaders.Headers,
 						nextLocator,
+						p.network.PowLimitBits,
 					); err != nil {
+						if errors.Is(err, errHeaderChainDoesNotExtend) {
+							reachedTip = false
+							continue
+						}
 						return fmt.Errorf("invalid header batch: %w", err)
 					}
 					// Fetch block for each header
