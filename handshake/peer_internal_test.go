@@ -8,6 +8,14 @@ package handshake
 
 import "testing"
 
+func validateHeaderChain(headers []*BlockHeader, previous [32]byte) error {
+	return validateHeaderChainFromLocators(
+		headers,
+		[][32]byte{previous},
+		NetworkMainnet.PowLimitBits,
+	)
+}
+
 func TestValidateHeaderChainRejectsBrokenParent(t *testing.T) {
 	var previous [32]byte
 	var wrongParent [32]byte

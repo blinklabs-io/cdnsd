@@ -48,21 +48,6 @@ type Peer struct {
 	proofCh      chan Message
 }
 
-// validateHeaderChain verifies the bounded header batch before any blocks are
-// requested. Difficulty retarget validation still requires more chain history
-// than this peer retains; each header is nevertheless checked for a valid
-// compact target, PoW, and exact parent linkage.
-func validateHeaderChain(
-	headers []*BlockHeader,
-	previous [32]byte,
-) error {
-	return validateHeaderChainFromLocators(
-		headers,
-		[][32]byte{previous},
-		NetworkMainnet.PowLimitBits,
-	)
-}
-
 func validateHeaderChainFromLocators(
 	headers []*BlockHeader,
 	locators [][32]byte,
