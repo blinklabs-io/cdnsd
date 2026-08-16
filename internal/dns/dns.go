@@ -1757,7 +1757,7 @@ func (r *Resolver) doQueryWithContext(
 	ctx *resolutionContext,
 ) (*dns.Msg, error) {
 	if ctx == nil {
-		ctx = newResolutionContext()
+		ctx = newResolutionContextWithContext(requestContext(ctx))
 	}
 	if err := requestContext(ctx).Err(); err != nil {
 		return nil, err
