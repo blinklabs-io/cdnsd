@@ -23,7 +23,7 @@ Resolver for Cardano-based second-level domains on Handshake top-level domains
 - **Debugging and Observability:**
   - Optional debug HTTP server (for pprof, etc.)
 - **Persistence:**
-- Local disk database to store sync state and discovered blockchain data
+  - Local disk database to store sync state and discovered blockchain data
 
 ### Upgrade note
 

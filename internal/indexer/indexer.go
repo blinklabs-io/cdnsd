@@ -466,7 +466,7 @@ func validateAndConvertRecords(
 		}
 		ttl := 0
 		if record.Ttl.HasValue() {
-			if record.Ttl.Value > math.MaxInt32 {
+			if record.Ttl.Value > math.MaxUint32 {
 				return nil, errors.New("record ttl value out of bounds")
 			}
 			ttl = int(record.Ttl.Value) // #nosec G115

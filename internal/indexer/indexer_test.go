@@ -142,13 +142,27 @@ func TestValidateAndConvertRecordsRejectsUnsafeData(t *testing.T) {
 	); err == nil || !strings.Contains(err.Error(), "NSEC3 next owner hash has length") {
 		t.Fatalf("wrong-length NSEC3 hash error = %v", err)
 	}
-	ttlRecord := validRecord("A", "alice.cardano.", "192.0.2.1")
-	ttlRecord.Ttl = models.NewCardanoDnsMaybe[models.CardanoDnsTtl](
-		models.CardanoDnsTtl(math.MaxInt32 + 1),
+	maxTTLRecord := validRecord("A", "alice.cardano.", "192.0.2.1")
+	maxTTLRecord.Ttl = models.NewCardanoDnsMaybe[models.CardanoDnsTtl](
+		models.CardanoDnsTtl(math.MaxUint32),
+	)
+	converted, err := validateAndConvertRecords(
+		"alice.cardano.",
+		[]models.CardanoDnsDomainRecord{maxTTLRecord},
+	)
+	if err != nil {
+		t.Fatalf("maximum DNS wire TTL should be accepted: %v", err)
+	}
+	if converted[0].Ttl != math.MaxUint32 {
+		t.Fatalf("maximum DNS wire TTL = %d, want %d", converted[0].Ttl, math.MaxUint32)
+	}
+	tooHighTTLRecord := validRecord("A", "alice.cardano.", "192.0.2.1")
+	tooHighTTLRecord.Ttl = models.NewCardanoDnsMaybe[models.CardanoDnsTtl](
+		models.CardanoDnsTtl(math.MaxUint32 + 1),
 	)
 	if _, err := validateAndConvertRecords(
 		"alice.cardano.",
-		[]models.CardanoDnsDomainRecord{ttlRecord},
+		[]models.CardanoDnsDomainRecord{tooHighTTLRecord},
 	); err == nil {
 		t.Fatal("TTL above the DNS wire limit should be rejected")
 	}
