@@ -207,7 +207,7 @@ func (r *Resolver) resolveNameserverAddress(
 	ctx *resolutionContext,
 ) ([]net.IP, error) {
 	if ctx == nil {
-		ctx = newResolutionContext()
+		ctx = newResolutionContextWithContext(requestContext(ctx))
 	}
 	if err := requestContext(ctx).Err(); err != nil {
 		return nil, err
@@ -425,7 +425,9 @@ func (r *Resolver) rootServers() []string {
 	return append(ipv4Servers, ipv6Servers...)
 }
 
-// getRandomRootServer returns a random root server address from hints.
+// getRandomRootServer returns a root server address from hints.
+//
+//nolint:unused // Retained as a compatibility helper for package tests.
 func (r *Resolver) getRandomRootServer() string {
 	servers := r.rootServers()
 	if len(servers) == 0 {
