@@ -289,10 +289,39 @@ func (r *Resolver) resolveNameserverAddress(
 		err error
 	}
 	results := make(chan rootResult, len(rootServers))
+	sharedValidation := childCtx.validation.clone()
+	var validationMu sync.Mutex
+	validationTimeout := configuredDuration(
+		config.GetConfig().Dns.QueryTimeoutMs,
+		5*time.Second,
+		30*time.Second,
+	)
+	prepareValidation := func(rootNS string) (*dnssecValidation, error) {
+		validationMu.Lock()
+		defer validationMu.Unlock()
+		if sharedValidation != nil &&
+			!sharedValidation.insecure &&
+			len(sharedValidation.keys) == 0 {
+			if err := r.ensureDNSSECKeys(
+				rootCtx,
+				sharedValidation,
+				rootNS,
+				validationTimeout,
+			); err != nil {
+				return nil, err
+			}
+		}
+		return sharedValidation.clone(), nil
+	}
 	for _, rootNS := range rootServers {
 		go func(rootNS string) {
 			rootChildCtx := *childCtx
-			rootChildCtx.validation = childCtx.validation.clone()
+			validation, err := prepareValidation(rootNS)
+			if err != nil {
+				results <- rootResult{err: err}
+				return
+			}
+			rootChildCtx.validation = validation
 			rootChildCtx.requestCtx = rootCtx
 			var rootIPs []net.IP
 			var lastErr error
