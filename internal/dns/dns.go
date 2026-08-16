@@ -82,6 +82,7 @@ type resolutionContext struct {
 	requestCtx context.Context
 }
 
+//nolint:unused // Retained as a context-free compatibility helper for tests.
 func newResolutionContext() *resolutionContext {
 	return newResolutionContextWithContext(context.Background())
 }
@@ -305,7 +306,8 @@ func (r *Resolver) resolveNameserverAddress(
 				msg := new(dns.Msg)
 				msg.SetQuestion(nsName, queryType)
 				msg.RecursionDesired = true
-				resp, err := r.doQueryWithContext(msg, rootNS, true, &rootChildCtx)
+				// rootChildCtx carries rootCtx through the resolution context.
+				resp, err := r.doQueryWithContext(msg, rootNS, true, &rootChildCtx) //nolint:contextcheck
 				if err != nil {
 					lastErr = fmt.Errorf("query root %s for %s: %w", rootNS, nsName, err)
 					continue
