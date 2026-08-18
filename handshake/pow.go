@@ -42,6 +42,13 @@ func CompactToTarget(bits uint32) *big.Int {
 // cannot be used for proof-of-work. Handshake's consensus verifier accepts
 // positive targets that fit in 256 bits; it does not accept a negative, zero,
 // overflowing, or non-canonical encoding.
+//
+// Rejecting non-canonical encodings is stricter than hsd's decode-side rules,
+// which accept any compact form that decodes to a usable target. It cannot
+// reject a real block: the retarget algorithm computes a target and encodes it,
+// and that encoding is canonical by construction, so no honestly-produced
+// header carries a non-canonical Bits value. The stricter rule only removes
+// encoding freedom from a peer feeding us fabricated headers.
 func CompactToTargetChecked(bits uint32) (*big.Int, error) {
 	if bits&0x00800000 != 0 {
 		return nil, errCompactTargetNegative

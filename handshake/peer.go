@@ -76,16 +76,22 @@ func validateHeaderChainFromLocators(
 			headers[0].PrevBlock,
 		)
 	}
-	powLimit, err := CompactToTargetChecked(network.PowLimitBits)
-	if err != nil {
-		return fmt.Errorf(
-			"invalid network PoW limit 0x%08x: %w",
-			network.PowLimitBits,
-			err,
-		)
-	}
-	if network.PowLimit != nil {
-		powLimit = network.PowLimit
+	// PowLimit is the value actually enforced below, so only derive it from the
+	// compact PowLimitBits when the network does not supply it directly. Doing
+	// the conversion unconditionally would reject a network that configures
+	// PowLimit alone, since CompactToTargetChecked refuses the zero value that
+	// PowLimitBits would then hold.
+	powLimit := network.PowLimit
+	if powLimit == nil {
+		var err error
+		powLimit, err = CompactToTargetChecked(network.PowLimitBits)
+		if err != nil {
+			return fmt.Errorf(
+				"invalid network PoW limit 0x%08x: %w",
+				network.PowLimitBits,
+				err,
+			)
+		}
 	}
 	var expectedPrevious [32]byte
 	for idx, header := range headers {

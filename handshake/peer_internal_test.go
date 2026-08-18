@@ -6,7 +6,10 @@
 
 package handshake
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func validateHeaderChain(headers []*BlockHeader, previous [32]byte) error {
 	return validateHeaderChainFromLocators(
@@ -40,5 +43,56 @@ func TestValidateHeaderChainRejectsTargetAboveNetworkLimit(t *testing.T) {
 		[32]byte{},
 	); err == nil {
 		t.Fatal("validateHeaderChain accepted a target above the network limit")
+	}
+}
+
+// TestValidateHeaderChainUsesExplicitPowLimit covers a network that configures
+// PowLimit directly and leaves the compact PowLimitBits at its zero value.
+// PowLimit is what the per-header check enforces, so deriving the limit from
+// PowLimitBits unconditionally would reject every header batch on such a
+// network: CompactToTargetChecked refuses a zero encoding.
+func TestValidateHeaderChainUsesExplicitPowLimit(t *testing.T) {
+	network := Network{
+		Name:     "explicit-powlimit",
+		PowLimit: CompactToTarget(0x1d00ffff),
+		// PowLimitBits deliberately left zero.
+	}
+	// A target at the configured limit must be accepted by the limit check.
+	// ValidatePoW still applies, so assert on the limit error specifically
+	// rather than on overall success.
+	err := validateHeaderChainFromLocators(
+		[]*BlockHeader{{Bits: 0x1d00ffff}},
+		[][32]byte{{}},
+		network,
+	)
+	if err != nil && strings.Contains(err.Error(), "invalid network PoW limit") {
+		t.Fatalf("explicit PowLimit was ignored in favour of zero PowLimitBits: %v", err)
+	}
+	if err != nil && strings.Contains(err.Error(), "exceeds network PoW limit") {
+		t.Fatalf("target at the configured limit was rejected: %v", err)
+	}
+
+	// A target above the configured limit must still be refused.
+	err = validateHeaderChainFromLocators(
+		[]*BlockHeader{{Bits: 0x1e00ffff}},
+		[][32]byte{{}},
+		network,
+	)
+	if err == nil || !strings.Contains(err.Error(), "exceeds network PoW limit") {
+		t.Fatalf("target above the configured PowLimit: want a limit error, got %v", err)
+	}
+}
+
+// TestValidateHeaderChainRejectsUnusableNetworkPowLimit is the companion: with
+// neither PowLimit nor a valid PowLimitBits there is no limit to enforce, so
+// validation must fail loudly rather than proceed without a ceiling.
+func TestValidateHeaderChainRejectsUnusableNetworkPowLimit(t *testing.T) {
+	err := validateHeaderChainFromLocators(
+		[]*BlockHeader{{Bits: 0x1d00ffff}},
+		[][32]byte{{}},
+		Network{Name: "no-powlimit"},
+	)
+	if err == nil || !strings.Contains(err.Error(), "invalid network PoW limit") {
+		t.Fatalf("network with no usable PoW limit: want an invalid-limit error, got %v", err)
 	}
 }
