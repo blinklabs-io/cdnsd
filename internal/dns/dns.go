@@ -289,29 +289,30 @@ func (r *Resolver) resolveNameserverAddress(
 		err error
 	}
 	results := make(chan rootResult, len(rootServers))
-	sharedValidation := childCtx.validation.clone()
-	var validationMu sync.Mutex
 	validationTimeout := configuredDuration(
 		config.GetConfig().Dns.QueryTimeoutMs,
 		5*time.Second,
 		30*time.Second,
 	)
 	prepareValidation := func(rootNS string) (*dnssecValidation, error) {
-		validationMu.Lock()
-		defer validationMu.Unlock()
-		if sharedValidation != nil &&
-			!sharedValidation.insecure &&
-			len(sharedValidation.keys) == 0 {
+		// Each root gets an independent validation state so a slow or
+		// unreachable root cannot hold every alternate root behind its
+		// DNSKEY exchange. The trust anchors are immutable for this lookup;
+		// only the per-root key cache is populated by ensureDNSSECKeys.
+		validation := childCtx.validation.clone()
+		if validation != nil &&
+			!validation.insecure &&
+			len(validation.keys) == 0 {
 			if err := r.ensureDNSSECKeys(
 				rootCtx,
-				sharedValidation,
+				validation,
 				rootNS,
 				validationTimeout,
 			); err != nil {
 				return nil, err
 			}
 		}
-		return sharedValidation.clone(), nil
+		return validation, nil
 	}
 	for _, rootNS := range rootServers {
 		go func(rootNS string) {
