@@ -51,7 +51,7 @@ type Peer struct {
 func validateHeaderChainFromLocators(
 	headers []*BlockHeader,
 	locators [][32]byte,
-	powLimitBits uint32,
+	network Network,
 ) error {
 	if len(headers) > maxBlockHeaders {
 		return fmt.Errorf("too many block headers: %d", len(headers))
@@ -76,9 +76,16 @@ func validateHeaderChainFromLocators(
 			headers[0].PrevBlock,
 		)
 	}
-	powLimit, err := CompactToTargetChecked(powLimitBits)
+	powLimit, err := CompactToTargetChecked(network.PowLimitBits)
 	if err != nil {
-		return fmt.Errorf("invalid network PoW limit 0x%08x: %w", powLimitBits, err)
+		return fmt.Errorf(
+			"invalid network PoW limit 0x%08x: %w",
+			network.PowLimitBits,
+			err,
+		)
+	}
+	if network.PowLimit != nil {
+		powLimit = network.PowLimit
 	}
 	var expectedPrevious [32]byte
 	for idx, header := range headers {
@@ -526,7 +533,7 @@ func (p *Peer) Sync(locator [][32]byte, syncFunc SyncFunc) error {
 					if err := validateHeaderChainFromLocators(
 						msgHeaders.Headers,
 						nextLocator,
-						p.network.PowLimitBits,
+						p.network,
 					); err != nil {
 						if errors.Is(err, errHeaderChainDoesNotExtend) {
 							reachedTip = false

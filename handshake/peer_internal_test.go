@@ -12,7 +12,7 @@ func validateHeaderChain(headers []*BlockHeader, previous [32]byte) error {
 	return validateHeaderChainFromLocators(
 		headers,
 		[][32]byte{previous},
-		NetworkMainnet.PowLimitBits,
+		NetworkMainnet,
 	)
 }
 
