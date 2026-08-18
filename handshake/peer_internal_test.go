@@ -7,6 +7,7 @@
 package handshake
 
 import (
+	"math/big"
 	"strings"
 	"testing"
 )
@@ -94,5 +95,30 @@ func TestValidateHeaderChainRejectsUnusableNetworkPowLimit(t *testing.T) {
 	)
 	if err == nil || !strings.Contains(err.Error(), "invalid network PoW limit") {
 		t.Fatalf("network with no usable PoW limit: want an invalid-limit error, got %v", err)
+	}
+}
+
+// TestValidateHeaderChainRejectsInvalidExplicitPowLimit covers a malformed
+// explicit PowLimit. It bypasses the compact decoder, so it needs the same
+// bounds check: a non-positive limit rejects every header and stalls sync, and
+// one wider than 256 bits cannot constrain any hash, silently disabling the
+// gate that stops a peer choosing its own difficulty.
+func TestValidateHeaderChainRejectsInvalidExplicitPowLimit(t *testing.T) {
+	oversized := new(big.Int).Lsh(big.NewInt(1), 256)
+	for name, limit := range map[string]*big.Int{
+		"zero":      big.NewInt(0),
+		"negative":  big.NewInt(-1),
+		"oversized": oversized,
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := validateHeaderChainFromLocators(
+				[]*BlockHeader{{Bits: 0x1d00ffff}},
+				[][32]byte{{}},
+				Network{Name: "bad-powlimit", PowLimit: limit},
+			)
+			if err == nil || !strings.Contains(err.Error(), "invalid network PoW limit") {
+				t.Fatalf("PowLimit %s: want an invalid-limit error, got %v", limit, err)
+			}
+		})
 	}
 }

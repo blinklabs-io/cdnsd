@@ -92,6 +92,15 @@ func validateHeaderChainFromLocators(
 				err,
 			)
 		}
+	} else if powLimit.Sign() <= 0 || powLimit.BitLen() > 256 {
+		// An explicit limit skips the compact decoder, so it gets the same
+		// bounds check the decoder would have applied. A non-positive limit
+		// would reject every header and stall sync; one wider than 256 bits
+		// would not constrain any hash and would silently disable the gate.
+		return fmt.Errorf(
+			"invalid network PoW limit %s: must be positive and fit in 256 bits",
+			powLimit,
+		)
 	}
 	var expectedPrevious [32]byte
 	for idx, header := range headers {
