@@ -182,3 +182,42 @@ func TestValidateAndConvertRecordsRejectsUnsafeData(t *testing.T) {
 		t.Fatalf("quoted semicolon was changed: %q", quotedComment[0].Rhs)
 	}
 }
+
+func TestValidateAndConvertRecordsRejectsOwnerInjection(t *testing.T) {
+	tests := []struct {
+		name      string
+		ownerName string
+		wantError string
+	}{
+		{
+			name: "line break",
+			ownerName: "evil.attacker.example. 300 IN A 6.6.6.6\n" +
+				"sub.alice.cardano.",
+			wantError: "owner name contains a line break",
+		},
+		{
+			name:      "zone-file comment",
+			ownerName: "sub.alice.cardano.;evil.attacker.example.",
+			wantError: "owner name contains a zone-file comment",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			record := models.CardanoDnsDomainRecord{
+				Lhs:  []byte(test.ownerName),
+				Type: []byte("RRSIG"),
+				Rhs: []byte(
+					"A 8 2 300 20270101000000 20260101000000 12345 alice.cardano. AAAA=",
+				),
+			}
+
+			_, err := validateAndConvertRecords(
+				"alice.cardano.",
+				[]models.CardanoDnsDomainRecord{record},
+			)
+			if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("owner-name injection error = %v", err)
+			}
+		})
+	}
+}

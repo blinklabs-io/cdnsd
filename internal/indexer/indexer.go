@@ -444,6 +444,12 @@ func validateAndConvertRecords(
 		if recordName == "." {
 			return nil, errors.New("indexed record has an empty owner name")
 		}
+		if strings.ContainsAny(recordName, "\r\n") {
+			return nil, errors.New("indexed record owner name contains a line break")
+		}
+		if containsUnquotedComment(recordName) {
+			return nil, errors.New("indexed record owner name contains a zone-file comment")
+		}
 		if _, ok := dns.IsDomainName(recordName); !ok {
 			return nil, fmt.Errorf("invalid indexed record name %q", record.Lhs)
 		}
@@ -483,6 +489,14 @@ func validateAndConvertRecords(
 		}
 		if rr == nil {
 			return nil, fmt.Errorf("invalid %s record %q: parser returned no record", recordType, recordName)
+		}
+		if !strings.EqualFold(dns.CanonicalName(rr.Header().Name), recordName) ||
+			rr.Header().Rrtype != dns.StringToType[recordType] {
+			return nil, fmt.Errorf(
+				"invalid %s record %q: parsed owner or type does not match",
+				recordType,
+				recordName,
+			)
 		}
 		if err := validateEncodedDNSSECFields(rr); err != nil {
 			return nil, fmt.Errorf("invalid %s record %q: %w", recordType, recordName, err)
