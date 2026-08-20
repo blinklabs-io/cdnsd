@@ -17,3 +17,6 @@
 
 # State directory for local testing
 /.state
+
+# Git worktrees for parallel development
+/.worktrees
