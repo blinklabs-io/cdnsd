@@ -174,6 +174,10 @@ func (m *MsgVersion) Encode() []byte {
 }
 
 func (m *MsgVersion) Decode(data []byte) error {
+	const fixedLength = 4 + 8 + 8 + netAddressLength + 8 + 1 + 4 + 1
+	if len(data) < fixedLength {
+		return errors.New("version payload is too short")
+	}
 	m.Version = binary.LittleEndian.Uint32(data[0:4])
 	m.Services = binary.LittleEndian.Uint64(data[4:12])
 	m.Time = binary.LittleEndian.Uint64(data[12:20])
@@ -182,6 +186,9 @@ func (m *MsgVersion) Decode(data []byte) error {
 	}
 	m.Nonce = [8]byte(data[108:116])
 	userAgentLength := int(data[116])
+	if len(data) < fixedLength+userAgentLength {
+		return errors.New("invalid version payload length")
+	}
 	m.Agent = string(data[117 : 117+userAgentLength])
 	m.Height = binary.LittleEndian.Uint32(
 		data[117+userAgentLength : 117+userAgentLength+4],
@@ -425,6 +432,9 @@ func (m *MsgHeaders) Decode(data []byte) error {
 	count, bytesRead, err := ReadUvarint(data)
 	if err != nil {
 		return err
+	}
+	if count > maxBlockHeaders {
+		return fmt.Errorf("too many block headers: %d", count)
 	}
 	data = data[bytesRead:]
 	if len(data) != int(count*BlockHeaderSize) { // nolint:gosec
