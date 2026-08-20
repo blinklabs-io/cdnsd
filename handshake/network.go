@@ -6,14 +6,20 @@
 
 package handshake
 
+import "math/big"
+
 type Network struct {
-	Name        string
-	Magic       uint32
-	GenesisHash string
+	Name         string
+	Magic        uint32
+	GenesisHash  string
+	PowLimit     *big.Int
+	PowLimitBits uint32
 }
 
 var NetworkMainnet = Network{
-	Name:        "mainnet",
-	Magic:       1533997779,
-	GenesisHash: "5b6ef2d3c1f3cdcadfd9a030ba1811efdd17740f14e166489760741d075992e0",
+	Name:         "mainnet",
+	Magic:        1533997779,
+	GenesisHash:  "5b6ef2d3c1f3cdcadfd9a030ba1811efdd17740f14e166489760741d075992e0",
+	PowLimit:     CompactToTarget(0x1c00ffff),
+	PowLimitBits: 0x1c00ffff,
 }

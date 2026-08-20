@@ -816,7 +816,7 @@ func (r *Resolver) handleQuery(w dns.ResponseWriter, req *dns.Msg) {
 			for nameserver, addresses := range nameservers {
 				// NS record
 				ns := &dns.NS{
-					Hdr: dns.RR_Header{Name: (nameserverDomain), Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 999},
+					Hdr: dns.RR_Header{Name: nameserverDomain, Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 999},
 					Ns:  nameserver,
 				}
 				m.Ns = append(m.Ns, ns)
@@ -984,6 +984,13 @@ func lookupLocalSignatures(
 }
 
 func lookupLocalZoneDNSSECRecords(
+	zone string,
+	fromHandshake bool,
+) ([]dns.RR, error) {
+	return lookupCachedLocalZoneDNSSECRecords(zone, fromHandshake)
+}
+
+func lookupLocalZoneDNSSECRecordsUncached(
 	zone string,
 	fromHandshake bool,
 ) ([]dns.RR, error) {

@@ -122,6 +122,59 @@ func TestLoadReturnsAlreadyLoadedForLoadedState(t *testing.T) {
 	}
 }
 
+func TestDNSSECRevisionChangesForBothNamespaces(t *testing.T) {
+	s := newLoadedTestState(t)
+	_, revision, err := s.DNSSECRevision(false)
+	if err != nil || revision != 0 {
+		t.Fatalf("initial Cardano revision = %d, %v; want zero", revision, err)
+	}
+	if err := s.UpdateDomain("example", nil); err != nil {
+		t.Fatalf("UpdateDomain() error = %v", err)
+	}
+	_, revision, err = s.DNSSECRevision(false)
+	if err != nil || revision != 1 {
+		t.Fatalf("Cardano revision after update = %d, %v; want one", revision, err)
+	}
+	_, handshakeRevision, err := s.DNSSECRevision(true)
+	if err != nil || handshakeRevision != 0 {
+		t.Fatalf("initial Handshake revision = %d, %v; want zero", handshakeRevision, err)
+	}
+	if err := s.UpdateHandshakeDomain("example", nil); err != nil {
+		t.Fatalf("UpdateHandshakeDomain() error = %v", err)
+	}
+	_, handshakeRevision, err = s.DNSSECRevision(true)
+	if err != nil || handshakeRevision != 1 {
+		t.Fatalf("Handshake revision after update = %d, %v; want one", handshakeRevision, err)
+	}
+}
+
+func TestDNSSECRevisionInstanceChangesAcrossReload(t *testing.T) {
+	s := newLoadedTestState(t)
+	if err := s.UpdateDomain("example", nil); err != nil {
+		t.Fatalf("UpdateDomain() error = %v", err)
+	}
+	instanceBefore, revisionBefore, err := s.DNSSECRevision(false)
+	if err != nil {
+		t.Fatalf("DNSSECRevision() before reload error = %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if err := s.Load(); err != nil {
+		t.Fatalf("Load() after close error = %v", err)
+	}
+	instanceAfter, revisionAfter, err := s.DNSSECRevision(false)
+	if err != nil {
+		t.Fatalf("DNSSECRevision() after reload error = %v", err)
+	}
+	if instanceBefore == instanceAfter {
+		t.Fatalf("state instance ID did not change across reload: %d", instanceBefore)
+	}
+	if revisionBefore != revisionAfter {
+		t.Fatalf("revision changed across reload: before=%d after=%d", revisionBefore, revisionAfter)
+	}
+}
+
 func TestGetCursorReturnsErrorForMalformedPersistedValues(t *testing.T) {
 	tests := []struct {
 		name  string
