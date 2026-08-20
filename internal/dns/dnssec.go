@@ -35,6 +35,16 @@ type dnssecValidation struct {
 	insecure bool
 }
 
+func (v *dnssecValidation) clone() *dnssecValidation {
+	if v == nil {
+		return nil
+	}
+	clone := *v
+	clone.anchors = slices.Clone(v.anchors)
+	clone.keys = slices.Clone(v.keys)
+	return &clone
+}
+
 func (r *Resolver) loadTrustAnchors(cfg *config.Config) error {
 	r.trustAnchors = make(map[string][]dns.RR)
 	if !cfg.Dns.DNSSEC.Enabled {
@@ -253,7 +263,7 @@ func (r *Resolver) ensureDNSSECKeys(
 
 	msg := new(dns.Msg)
 	msg.SetQuestion(validation.zone, dns.TypeDNSKEY)
-	resp, err := exchangeDNS(ctx, dnssecQuery(msg), address, timeout)
+	resp, err := r.exchange(ctx, dnssecQuery(msg), address, timeout)
 	if err != nil {
 		return fmt.Errorf("%w: fetch DNSKEY for %s: %w",
 			errDNSSECBogus,

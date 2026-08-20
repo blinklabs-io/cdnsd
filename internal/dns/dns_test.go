@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -258,10 +259,16 @@ func TestLoadConfiguredTLSConfigLogsInfoWhenPathsEmpty(t *testing.T) {
 		t.Fatalf("expected TLS disabled log, got %q", logOutput.String())
 	}
 	if !strings.Contains(logOutput.String(), "level=INFO") {
-		t.Fatalf("expected TLS disabled log at info level, got %q", logOutput.String())
+		t.Fatalf(
+			"expected TLS disabled log at info level, got %q",
+			logOutput.String(),
+		)
 	}
 	if strings.Contains(logOutput.String(), "level=WARN") {
-		t.Fatalf("expected TLS disabled log not to warn, got %q", logOutput.String())
+		t.Fatalf(
+			"expected TLS disabled log not to warn, got %q",
+			logOutput.String(),
+		)
 	}
 }
 
@@ -340,8 +347,45 @@ func stateIsLoaded() bool {
 }
 
 type captureResponseWriter struct {
-	msg *dns.Msg
-	raw []byte
+	msg    *dns.Msg
+	raw    []byte
+	remote net.Addr
+}
+
+// doQueryWithContext is a test helper for exercising the nameserver query
+// path with one explicitly addressed server.
+func (r *Resolver) doQueryWithContext(
+	msg *dns.Msg,
+	address string,
+	recursive bool,
+	ctx *resolutionContext,
+) (*dns.Msg, error) {
+	if ctx == nil {
+		ctx = newResolutionContext()
+	}
+	if err := requestContext(ctx).Err(); err != nil {
+		return nil, err
+	}
+	if ctx.atMaxDepth() {
+		return nil, errors.New("max resolution depth exceeded")
+	}
+
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		host = address
+		port = "53"
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return nil, fmt.Errorf("invalid IP address: %s", host)
+	}
+	return r.queryMultipleNameserversWithPort(
+		msg,
+		map[string][]net.IP{"initial": {ip}},
+		recursive,
+		ctx,
+		port,
+	)
 }
 
 func (w *captureResponseWriter) LocalAddr() net.Addr {
@@ -349,6 +393,9 @@ func (w *captureResponseWriter) LocalAddr() net.Addr {
 }
 
 func (w *captureResponseWriter) RemoteAddr() net.Addr {
+	if w.remote != nil {
+		return w.remote
+	}
 	return &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 12345}
 }
 
@@ -463,6 +510,386 @@ func TestHandleQueryNilRequestDoesNotPanic(t *testing.T) {
 	resolver.handleQuery(w, nil)
 }
 
+func TestRecursionAllowlist(t *testing.T) {
+	cfg := *config.GetConfig()
+	cfg.Dns.RecursionAllowlist = []string{"192.0.2.0/24", "2001:db8::1"}
+	resolver, err := NewResolver(&cfg)
+	if err != nil {
+		t.Fatalf("NewResolver() error = %v", err)
+	}
+
+	if !resolver.recursionAllowed(&captureResponseWriter{
+		remote: &net.UDPAddr{IP: net.ParseIP("192.0.2.10"), Port: 53},
+	}) {
+		t.Error("allowlisted IPv4 client was rejected")
+	}
+	if !resolver.recursionAllowed(&captureResponseWriter{
+		remote: &net.UDPAddr{IP: net.ParseIP("2001:db8::1"), Port: 53},
+	}) {
+		t.Error("allowlisted IPv6 client was rejected")
+	}
+	if resolver.recursionAllowed(&captureResponseWriter{
+		remote: &net.UDPAddr{IP: net.ParseIP("198.51.100.1"), Port: 53},
+	}) {
+		t.Error("non-allowlisted client was accepted")
+	}
+}
+
+func TestNonAllowlistedClientStillReceivesAuthoritativeResponses(t *testing.T) {
+	loadIsolatedTestState(t)
+	cfg := config.GetConfig()
+	originalDNS := cfg.Dns
+	cfg.Dns.RecursionEnabled = true
+	cfg.Dns.RecursionAllowlist = []string{"127.0.0.0/8"}
+	t.Cleanup(func() { cfg.Dns = originalDNS })
+
+	resolver, err := NewResolver(cfg)
+	if err != nil {
+		t.Fatalf("NewResolver() error = %v", err)
+	}
+	var exchanges atomic.Int32
+	resolver.exchangeFn = func(
+		context.Context,
+		*dns.Msg,
+		string,
+		time.Duration,
+	) (*dns.Msg, error) {
+		exchanges.Add(1)
+		return nil, errors.New("unexpected upstream exchange")
+	}
+	if err := state.GetState().UpdateDomain(
+		"delegated.ada",
+		[]state.DomainRecord{
+			{
+				Lhs:  "delegated.ada.",
+				Type: "NS",
+				Ttl:  300,
+				Rhs:  "ns.delegated.ada.",
+			},
+			{
+				Lhs:  "ns.delegated.ada.",
+				Type: "A",
+				Ttl:  300,
+				Rhs:  "192.0.2.53",
+			},
+		},
+	); err != nil {
+		t.Fatalf("UpdateDomain() error = %v", err)
+	}
+
+	remote := &net.UDPAddr{IP: net.ParseIP("198.51.100.10"), Port: 53000}
+	t.Run("delegation referral", func(t *testing.T) {
+		req := new(dns.Msg)
+		req.SetQuestion("www.delegated.ada.", dns.TypeA)
+		req.RecursionDesired = true
+		writer := &captureResponseWriter{remote: remote}
+
+		resolver.handleQuery(writer, req)
+
+		if writer.msg == nil {
+			t.Fatal("handleQuery() wrote no response")
+		}
+		if writer.msg.Rcode != dns.RcodeSuccess || len(writer.msg.Ns) == 0 {
+			t.Fatalf("response = %v, want authoritative referral", writer.msg)
+		}
+		if writer.msg.RecursionAvailable {
+			t.Fatal("referral advertised recursion to a disallowed client")
+		}
+	})
+
+	t.Run("authoritative negative", func(t *testing.T) {
+		req := new(dns.Msg)
+		req.SetQuestion("missing.ada.", dns.TypeA)
+		req.RecursionDesired = true
+		writer := &captureResponseWriter{remote: remote}
+
+		resolver.handleQuery(writer, req)
+
+		if writer.msg == nil {
+			t.Fatal("handleQuery() wrote no response")
+		}
+		if writer.msg.Rcode != dns.RcodeNameError || !writer.msg.Authoritative {
+			t.Fatalf("response = %v, want authoritative NXDOMAIN", writer.msg)
+		}
+		if writer.msg.RecursionAvailable {
+			t.Fatal(
+				"negative response advertised recursion to a disallowed client",
+			)
+		}
+	})
+
+	t.Run("unrelated name refused", func(t *testing.T) {
+		req := new(dns.Msg)
+		req.SetQuestion("example.com.", dns.TypeA)
+		req.RecursionDesired = true
+		writer := &captureResponseWriter{remote: remote}
+
+		resolver.handleQuery(writer, req)
+
+		if writer.msg == nil {
+			t.Fatal("handleQuery() wrote no response")
+		}
+		if writer.msg.Rcode != dns.RcodeRefused {
+			t.Fatalf("response = %v, want REFUSED", writer.msg)
+		}
+		if writer.msg.RecursionAvailable {
+			t.Fatal("refusal advertised recursion to a disallowed client")
+		}
+	})
+
+	if got := exchanges.Load(); got != 0 {
+		t.Fatalf("disallowed client triggered %d upstream exchanges", got)
+	}
+}
+
+func TestResolveNameserverAddressBoundsConcurrentRootQueries(t *testing.T) {
+	resolver := &Resolver{
+		rootHints: map[uint16]map[string][]dns.RR{
+			dns.TypeA: {
+				"a.root-test.": {
+					&dns.A{
+						Hdr: dns.RR_Header{
+							Name:   "a.root-test.",
+							Rrtype: dns.TypeA,
+						},
+						A: net.ParseIP("192.0.2.1"),
+					},
+				},
+				"b.root-test.": {
+					&dns.A{
+						Hdr: dns.RR_Header{
+							Name:   "b.root-test.",
+							Rrtype: dns.TypeA,
+						},
+						A: net.ParseIP("192.0.2.2"),
+					},
+				},
+			},
+			dns.TypeAAAA: {
+				"a.root-test.": {
+					&dns.AAAA{
+						Hdr: dns.RR_Header{
+							Name:   "a.root-test.",
+							Rrtype: dns.TypeAAAA,
+						},
+						AAAA: net.ParseIP("2001:db8::1"),
+					},
+				},
+				"b.root-test.": {
+					&dns.AAAA{
+						Hdr: dns.RR_Header{
+							Name:   "b.root-test.",
+							Rrtype: dns.TypeAAAA,
+						},
+						AAAA: net.ParseIP("2001:db8::2"),
+					},
+				},
+			},
+		},
+	}
+	started := make(chan struct{}, 8)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	resolver.exchangeFn = func(
+		ctx context.Context,
+		msg *dns.Msg,
+		_ string,
+		_ time.Duration,
+	) (*dns.Msg, error) {
+		started <- struct{}{}
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		resp := new(dns.Msg)
+		resp.SetReply(msg)
+		resp.Authoritative = true
+		if msg.Question[0].Qtype == dns.TypeA {
+			resp.Answer = []dns.RR{&dns.A{
+				Hdr: dns.RR_Header{
+					Name:   msg.Question[0].Name,
+					Rrtype: dns.TypeA,
+					Class:  dns.ClassINET,
+				},
+				A: net.ParseIP("192.0.2.53"),
+			}}
+		} else {
+			resp.Answer = []dns.RR{&dns.AAAA{
+				Hdr:  dns.RR_Header{Name: msg.Question[0].Name, Rrtype: dns.TypeAAAA, Class: dns.ClassINET},
+				AAAA: net.ParseIP("2001:db8::53"),
+			}}
+		}
+		return resp, nil
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := resolver.resolveNameserverAddress(
+			"ns.example.",
+			newResolutionContext(),
+		)
+		done <- err
+	}()
+	for range 2 {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("two root exchanges did not start")
+		}
+	}
+	select {
+	case <-started:
+		t.Error("more than two root exchanges started concurrently")
+	case <-time.After(50 * time.Millisecond):
+	}
+	releaseOnce.Do(func() { close(release) })
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("resolveNameserverAddress() error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("resolveNameserverAddress() did not finish")
+	}
+}
+
+func TestNameserverQueryLimitIsSharedAcrossReferrals(t *testing.T) {
+	resolver := &Resolver{}
+	started := make(chan string, 4)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	resolver.exchangeFn = func(
+		ctx context.Context,
+		query *dns.Msg,
+		address string,
+		_ time.Duration,
+	) (*dns.Msg, error) {
+		if address == "192.0.2.1:53" {
+			response := new(dns.Msg)
+			response.SetReply(query)
+			response.Ns = []dns.RR{
+				&dns.NS{
+					Hdr: dns.RR_Header{
+						Name:   "example.",
+						Rrtype: dns.TypeNS,
+						Class:  dns.ClassINET,
+					},
+					Ns: "ns1.example.",
+				},
+				&dns.NS{
+					Hdr: dns.RR_Header{
+						Name:   "example.",
+						Rrtype: dns.TypeNS,
+						Class:  dns.ClassINET,
+					},
+					Ns: "ns2.example.",
+				},
+			}
+			response.Extra = []dns.RR{
+				&dns.A{
+					Hdr: dns.RR_Header{
+						Name:   "ns1.example.",
+						Rrtype: dns.TypeA,
+						Class:  dns.ClassINET,
+					},
+					A: net.ParseIP("198.51.100.1"),
+				},
+				&dns.A{
+					Hdr: dns.RR_Header{
+						Name:   "ns2.example.",
+						Rrtype: dns.TypeA,
+						Class:  dns.ClassINET,
+					},
+					A: net.ParseIP("198.51.100.2"),
+				},
+			}
+			return response, nil
+		}
+
+		started <- address
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		response := new(dns.Msg)
+		response.SetReply(query)
+		response.Authoritative = true
+		response.Answer = []dns.RR{&dns.A{
+			Hdr: dns.RR_Header{
+				Name:   query.Question[0].Name,
+				Rrtype: dns.TypeA,
+				Class:  dns.ClassINET,
+			},
+			A: net.ParseIP("203.0.113.10"),
+		}}
+		return response, nil
+	}
+
+	query := new(dns.Msg)
+	query.SetQuestion("www.example.", dns.TypeA)
+	done := make(chan error, 1)
+	go func() {
+		_, err := resolver.queryNameserverAddresses(
+			query,
+			[]string{"192.0.2.1:53", "192.0.2.2:53"},
+			true,
+			newResolutionContext(),
+		)
+		done <- err
+	}()
+	for range maxConcurrentNameserverQueries {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("parent and child exchanges did not start")
+		}
+	}
+	select {
+	case address := <-started:
+		t.Fatalf("nested referral exceeded query limit at %s", address)
+	case <-time.After(50 * time.Millisecond):
+	}
+	releaseOnce.Do(func() { close(release) })
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("queryNameserverAddresses() error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("queryNameserverAddresses() did not finish")
+	}
+}
+
+func TestUnsupportedClassReturnsNotImplementedAndRA(t *testing.T) {
+	cfg := config.GetConfig()
+	original := cfg.Dns.RecursionEnabled
+	cfg.Dns.RecursionEnabled = true
+	t.Cleanup(func() { cfg.Dns.RecursionEnabled = original })
+
+	req := new(dns.Msg)
+	req.SetQuestion("example.", dns.TypeA)
+	req.Question[0].Qclass = dns.ClassCHAOS
+	w := &captureResponseWriter{}
+	resolver, err := NewResolver(cfg)
+	if err != nil {
+		t.Fatalf("NewResolver() error = %v", err)
+	}
+	resolver.handleQuery(w, req)
+	if w.msg == nil {
+		t.Fatal("expected response")
+	}
+	if w.msg.Rcode != dns.RcodeNotImplemented {
+		t.Fatalf("rcode = %s, want NOTIMP", dns.RcodeToString[w.msg.Rcode])
+	}
+	if !w.msg.RecursionAvailable {
+		t.Error("expected RA when recursion is enabled")
+	}
+}
+
 func TestNewResolverLoadsRootHints(t *testing.T) {
 	cfg := *config.GetConfig()
 	cfg.Dns.RootHints = strings.Join(
@@ -484,14 +911,22 @@ func TestNewResolverLoadsRootHints(t *testing.T) {
 	if len(resolver.rootHints[dns.TypeNS]["."]) != 1 {
 		t.Errorf("expected one root NS hint")
 	}
-	if len(resolver.rootHints[dns.TypeA]["A.ROOT-TEST."]) != 1 {
+	if len(resolver.rootHints[dns.TypeA]["a.root-test."]) != 1 {
 		t.Errorf("expected one root A hint")
 	}
-	if len(resolver.rootHints[dns.TypeAAAA]["A.ROOT-TEST."]) != 1 {
+	if len(resolver.rootHints[dns.TypeAAAA]["a.root-test."]) != 1 {
 		t.Errorf("expected one root AAAA hint")
 	}
 	if rootNS := resolver.getRandomRootServer(); rootNS != "192.0.2.1:53" {
-		t.Errorf("expected root server 192.0.2.1:53, got %q", rootNS)
+		t.Errorf("expected IPv4 root server, got %q", rootNS)
+	}
+	rootServers := resolver.rootServers()
+	if len(rootServers) != 2 || rootServers[0] != "192.0.2.1:53" ||
+		rootServers[1] != "[2001:db8::1]:53" {
+		t.Errorf(
+			"root server order = %v, want IPv4 followed by IPv6",
+			rootServers,
+		)
 	}
 }
 
@@ -506,7 +941,10 @@ func TestResolveNameserverAddressFromLocal(t *testing.T) {
 	ctx := newResolutionContext()
 	// Resolving a nonexistent nameserver should return an error
 	// (no local records, upstream resolution will fail)
-	ips, err := resolver.resolveNameserverAddress("nonexistent.example.com.", ctx)
+	ips, err := resolver.resolveNameserverAddress(
+		"nonexistent.example.com.",
+		ctx,
+	)
 	if err == nil {
 		t.Error("expected error for nonexistent nameserver")
 	}
@@ -1053,6 +1491,25 @@ func TestQueryWithRetryFirstAttemptSuccess(t *testing.T) {
 	}
 	if attempts != 1 {
 		t.Errorf("expected 1 attempt, got %d", attempts)
+	}
+}
+
+func TestQueryWithRetryContextCancelsBackoff(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	started := make(chan struct{})
+	var once sync.Once
+	go func() {
+		<-started
+		cancel()
+	}()
+
+	_, err := queryWithRetryContext(ctx, func() (*dns.Msg, error) {
+		once.Do(func() { close(started) })
+		return nil, errors.New("temporary failure")
+	}, 3, time.Second)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
 	}
 }
 

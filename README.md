@@ -41,9 +41,10 @@ Before exposing the resolver, operators should:
 
 - Set `indexer.verify: true` (the default) and keep it enabled. Disabling it
   is suitable only for controlled development experiments.
-- Bind DNS to the intended interface explicitly. Set
-  `dns.recursionEnabled: false` unless this instance is protected by network
-  ACLs and is deliberately operated as a recursive resolver.
+- Bind DNS to the intended interface explicitly. Recursive service is limited
+  to `dns.recursionAllowlist`, which defaults to loopback only. Keep
+  `dns.recursionEnabled: false` unless recursion is deliberate, and configure
+  both the allowlist and network ACLs before admitting non-loopback clients.
 - Keep metrics and debug/pprof on loopback or a protected management network.
   An empty metrics address is treated as loopback by the daemon; an explicit
   wildcard address exposes it broadly.
@@ -72,6 +73,11 @@ it for production traffic.
 | `dns.port`              | uint         | `DNS_LISTEN_PORT`                 | DNS UDP/TCP port (default: 8053) |
 | `dns.tlsPort`           | uint         | `DNS_LISTEN_TLS_PORT`             | DNS-over-TLS port (default: 8853) |
 | `dns.recursionEnabled`  | bool         | `DNS_RECURSION`                   | Allow recursive DNS lookups |
+| `dns.recursionAllowlist` | []string    | `DNS_RECURSION_ALLOWLIST`         | Client IPs/CIDRs allowed to recurse (default: `127.0.0.0/8`, `::1/128`) |
+| `dns.retryCount`        | int          | `DNS_RETRY_COUNT`                 | Upstream attempts per server (range: 1–10, default: 3) |
+| `dns.retryDelayMs`      | int          | `DNS_RETRY_DELAY_MS`              | Initial retry delay in milliseconds (range: 0–10000, default: 100) |
+| `dns.queryTimeoutMs`    | int          | `DNS_QUERY_TIMEOUT_MS`            | Per-upstream-query timeout in milliseconds (range: 5000–30000, default: 5000) |
+| `dns.recursionTimeoutMs` | int         | `DNS_RECURSION_TIMEOUT_MS`        | Whole recursive-request timeout in milliseconds (range: 10000–120000, default: 10000) |
 | `dns.rootHints`         | string       | `DNS_ROOT_HINTS`                  | DNS root hints (PEM string) |
 | `dns.rootHintsFile`     | string       | `DNS_ROOT_HINTS_FILE`             | File path to DNS root hints |
 | `dns.dnssec.enabled`    | bool         | `DNSSEC_ENABLED`                  | Validate recursive DNSSEC chains (default: false) |
@@ -108,6 +114,11 @@ dns:
   port: 8053
   tlsPort: 8853
   recursionEnabled: false
+  recursionAllowlist:
+    - "127.0.0.0/8"
+    - "::1/128"
+  queryTimeoutMs: 5000
+  recursionTimeoutMs: 10000
   rootHintsFile: "/etc/cdnsd/named.root"
   dnssec:
     enabled: true
