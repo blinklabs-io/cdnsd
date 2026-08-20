@@ -9,13 +9,13 @@ package config
 import "slices"
 
 type Profile struct {
-	Network          string // Cardano network name
-	Tld              string // Top-level domain
-	PolicyId         string // Verification asset policy ID
-	ScriptAddress    string // Address to follow
-	InterceptSlot    uint64 // Chain-sync initial intercept slot
-	InterceptHash    string // Chain-sync initial intercept hash
-	DiscoveryAddress string // Auto-discovery address to follow
+	Network          string `json:"network"`           // Cardano network name
+	Tld              string `json:"tld"`               // Top-level domain
+	PolicyId         string `json:"policy_id"`         // Verification asset policy ID
+	ScriptAddress    string `json:"script_address"`    // Address to follow
+	InterceptSlot    uint64 `json:"intercept_slot"`    // Chain-sync initial intercept slot
+	InterceptHash    string `json:"intercept_hash"`    // Chain-sync initial intercept hash
+	DiscoveryAddress string `json:"discovery_address"` // Auto-discovery address to follow
 }
 
 func GetProfiles() []Profile {

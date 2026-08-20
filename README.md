@@ -25,6 +25,13 @@ Resolver for Cardano-based second-level domains on Handshake top-level domains
 - **Persistence:**
   - Local disk database to store sync state and discovered blockchain data
 
+### Upgrade note
+
+The state fingerprint format changed in this release. On the first startup
+after upgrading, an existing database will be detected as changed, its indexed
+records and sync cursors will be cleared, and indexing will resync from the
+configured intercept point. DNSSEC anchor state is preserved.
+
 ## Configuration
 
 `cdnsd` supports configuration via YAML config files, and all settings may be overridden with environment variables.

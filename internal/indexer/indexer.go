@@ -7,6 +7,8 @@
 package indexer
 
 import (
+	"encoding/base32"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -49,6 +51,14 @@ var (
 	})
 )
 
+var supportedIndexedRecordTypes = map[string]struct{}{
+	"A": {}, "AAAA": {}, "CAA": {}, "CNAME": {},
+	"DS": {}, "DNSKEY": {}, "DNAME": {}, "MX": {},
+	"NAPTR": {}, "NS": {}, "NSEC": {}, "NSEC3": {},
+	"NSEC3PARAM": {}, "PTR": {}, "RRSIG": {}, "SOA": {},
+	"SRV": {}, "SSHFP": {}, "TLSA": {}, "TXT": {},
+}
+
 type Domain struct {
 	Name        string
 	Nameservers map[string]string
@@ -57,6 +67,8 @@ type Domain struct {
 type Indexer struct {
 	pipeline       *pipeline.Pipeline
 	domains        map[string]Domain
+	watchedMu      sync.RWMutex
+	statusMu       sync.RWMutex
 	tipReached     bool
 	syncLogTimer   *time.Timer
 	syncStatus     input_chainsync.ChainSyncStatus
@@ -111,13 +123,15 @@ func (i *Indexer) Start() error {
 func (i *Indexer) startCardano(stopCh <-chan struct{}) error {
 	// Build watched addresses from enabled profiles
 	cfg := config.GetConfig()
-	i.watched = nil
+	var watched []watchedAddr
+	i.statusMu.Lock()
 	i.tipReached = false
+	i.statusMu.Unlock()
 	for _, profile := range config.GetProfiles() {
 		if profile.ScriptAddress != "" {
 			// Add a static TLD mapping
-			i.watched = append(
-				i.watched,
+			watched = append(
+				watched,
 				watchedAddr{
 					Address:  profile.ScriptAddress,
 					Tld:      profile.Tld,
@@ -126,8 +140,8 @@ func (i *Indexer) startCardano(stopCh <-chan struct{}) error {
 			)
 		} else if profile.DiscoveryAddress != "" {
 			// Add an auto-discovery address
-			i.watched = append(
-				i.watched,
+			watched = append(
+				watched,
 				watchedAddr{
 					Address:   profile.DiscoveryAddress,
 					PolicyId:  profile.PolicyId,
@@ -142,8 +156,8 @@ func (i *Indexer) startCardano(stopCh <-chan struct{}) error {
 		return err
 	}
 	for _, tmpAddr := range discoveredAddr {
-		i.watched = append(
-			i.watched,
+		watched = append(
+			watched,
 			watchedAddr{
 				Address:  tmpAddr.Address,
 				PolicyId: tmpAddr.PolicyId,
@@ -151,13 +165,22 @@ func (i *Indexer) startCardano(stopCh <-chan struct{}) error {
 			},
 		)
 	}
+	i.watchedMu.Lock()
+	i.watched = watched
+	i.watchedMu.Unlock()
 	// Create pipeline
 	i.pipeline = pipeline.New()
 	// Configure pipeline input
 	inputOpts := []input_chainsync.ChainSyncOptionFunc{
 		input_chainsync.WithStatusUpdateFunc(
 			func(status input_chainsync.ChainSyncStatus) {
+				i.statusMu.Lock()
+				tipReached := i.tipReached
 				i.syncStatus = status
+				if !tipReached && status.TipReached {
+					i.tipReached = true
+				}
+				i.statusMu.Unlock()
 				metricSlot.Set(float64(status.SlotNumber))
 				metricTipSlot.Set(float64(status.TipSlotNumber))
 				if err := state.GetState().UpdateCursor(status.SlotNumber, status.BlockHash); err != nil {
@@ -165,11 +188,10 @@ func (i *Indexer) startCardano(stopCh <-chan struct{}) error {
 						fmt.Sprintf("failed to update cursor: %s", err),
 					)
 				}
-				if !i.tipReached && status.TipReached {
+				if !tipReached && status.TipReached {
 					if i.syncLogTimer != nil {
 						i.syncLogTimer.Stop()
 					}
-					i.tipReached = true
 					slog.Info("caught up to chain tip")
 				}
 			},
@@ -289,7 +311,12 @@ func (i *Indexer) handleEvent(evt event.Event) error {
 		if outAddrPayment == nil {
 			continue
 		}
-		for _, watchedAddr := range i.watched {
+		i.watchedMu.RLock()
+		// Snapshot per output so a discovery from an earlier output in the
+		// same transaction is visible to later outputs.
+		watched := append([]watchedAddr(nil), i.watched...)
+		i.watchedMu.RUnlock()
+		for _, watchedAddr := range watched {
 			if watchedAddr.Discovery {
 				if outAddr.String() == watchedAddr.Address ||
 					outAddrPayment.String() == watchedAddr.Address {
@@ -378,43 +405,17 @@ func (i *Indexer) handleEventOutputDns(
 				)
 				return nil
 			}
-			// Make sure all records are for specified origin domain
-			badRecordName := false
-			for _, record := range dnsDomain.Records {
-				recordName := dns.CanonicalName(
-					string(record.Lhs),
-				)
-				if !strings.HasSuffix(recordName, domainName) {
-					slog.Warn(
-						fmt.Sprintf(
-							"ignoring datum with record %q outside of origin domain (%s)",
-							recordName,
-							domainName,
-						),
-					)
-					badRecordName = true
-					break
-				}
-			}
-			if badRecordName {
-				return nil
-			}
 		}
-		// Convert domain records into our storage format
-		tmpRecords := []state.DomainRecord{}
-		for _, record := range dnsDomain.Records {
-			tmpRecord := state.DomainRecord{
-				Lhs:  string(record.Lhs),
-				Type: string(record.Type),
-				Rhs:  string(record.Rhs),
-			}
-			if record.Ttl.HasValue() {
-				if record.Ttl.Value > math.MaxInt {
-					return errors.New("record ttl value out of bounds")
-				}
-				tmpRecord.Ttl = int(record.Ttl.Value) // #nosec G115
-			}
-			tmpRecords = append(tmpRecords, tmpRecord)
+		// Validate and convert all records before publishing any of them. A
+		// malformed, unsupported, or out-of-zone record invalidates the datum.
+		tmpRecords, err := validateAndConvertRecords(domainName, dnsDomain.Records)
+		if err != nil {
+			slog.Warn(
+				"ignoring invalid DNS datum",
+				"domain", domainName,
+				"error", err,
+			)
+			return nil
 		}
 		if err := state.GetState().UpdateDomain(domainName, tmpRecords); err != nil {
 			return err
@@ -424,6 +425,220 @@ func (i *Indexer) handleEventOutputDns(
 		)
 	}
 	return nil
+}
+
+func validateAndConvertRecords(
+	domainName string,
+	records []models.CardanoDnsDomainRecord,
+) ([]state.DomainRecord, error) {
+	domainName = dns.CanonicalName(domainName)
+	if domainName == "." {
+		return nil, errors.New("indexed domain is the DNS root")
+	}
+	if _, ok := dns.IsDomainName(domainName); !ok {
+		return nil, fmt.Errorf("invalid indexed domain name %q", domainName)
+	}
+	ret := make([]state.DomainRecord, 0, len(records))
+	for _, record := range records {
+		recordName := dns.CanonicalName(string(record.Lhs))
+		if recordName == "." {
+			return nil, errors.New("indexed record has an empty owner name")
+		}
+		if strings.ContainsAny(recordName, "\r\n") {
+			return nil, errors.New("indexed record owner name contains a line break")
+		}
+		if containsUnquotedComment(recordName) {
+			return nil, errors.New("indexed record owner name contains a zone-file comment")
+		}
+		if _, ok := dns.IsDomainName(recordName); !ok {
+			return nil, fmt.Errorf("invalid indexed record name %q", record.Lhs)
+		}
+		if !nameWithinZone(recordName, domainName) {
+			return nil, fmt.Errorf(
+				"record name %q is outside indexed domain %q",
+				recordName,
+				domainName,
+			)
+		}
+		recordType := strings.ToUpper(strings.TrimSpace(string(record.Type)))
+		if _, ok := supportedIndexedRecordTypes[recordType]; !ok {
+			return nil, fmt.Errorf("unsupported indexed record type %q", record.Type)
+		}
+		if strings.ContainsAny(string(record.Rhs), "\r\n") {
+			return nil, errors.New("indexed record data contains a line break")
+		}
+		if containsUnquotedComment(string(record.Rhs)) {
+			return nil, errors.New("indexed record data contains a zone-file comment")
+		}
+		ttl := int64(0)
+		if record.Ttl.HasValue() {
+			if record.Ttl.Value > math.MaxUint32 {
+				return nil, errors.New("record ttl value out of bounds")
+			}
+			ttl = int64(record.Ttl.Value)
+		}
+		rr, err := dns.NewRR(fmt.Sprintf(
+			"%s %d IN %s %s",
+			recordName,
+			ttl,
+			recordType,
+			string(record.Rhs),
+		))
+		if err != nil {
+			return nil, fmt.Errorf("invalid %s record %q: %w", recordType, recordName, err)
+		}
+		if rr == nil {
+			return nil, fmt.Errorf("invalid %s record %q: parser returned no record", recordType, recordName)
+		}
+		if !strings.EqualFold(dns.CanonicalName(rr.Header().Name), recordName) ||
+			rr.Header().Rrtype != dns.StringToType[recordType] {
+			return nil, fmt.Errorf(
+				"invalid %s record %q: parsed owner or type does not match",
+				recordType,
+				recordName,
+			)
+		}
+		if err := validateEncodedDNSSECFields(rr); err != nil {
+			return nil, fmt.Errorf("invalid %s record %q: %w", recordType, recordName, err)
+		}
+		ret = append(ret, state.DomainRecord{
+			Lhs:  recordName,
+			Type: recordType,
+			Ttl:  ttl,
+			Rhs:  string(record.Rhs),
+		})
+	}
+	return ret, nil
+}
+
+func containsUnquotedComment(value string) bool {
+	quoted := false
+	escaped := false
+	for _, char := range value {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if char == '\\' {
+			escaped = true
+			continue
+		}
+		if char == '"' {
+			quoted = !quoted
+			continue
+		}
+		if char == ';' && !quoted {
+			return true
+		}
+	}
+	return false
+}
+
+func validateEncodedDNSSECFields(rr dns.RR) error {
+	decodeBase64 := func(field, value string) error {
+		if value == "" {
+			return fmt.Errorf("%s is empty", field)
+		}
+		if _, err := base64.StdEncoding.DecodeString(value); err != nil {
+			return fmt.Errorf("invalid %s: %w", field, err)
+		}
+		return nil
+	}
+	decodeHex := func(field, value string) ([]byte, error) {
+		if value == "" {
+			return nil, fmt.Errorf("%s is empty", field)
+		}
+		decoded, err := hex.DecodeString(value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid %s: %w", field, err)
+		}
+		return decoded, nil
+	}
+
+	switch record := rr.(type) {
+	case *dns.DNSKEY:
+		return decodeBase64("DNSKEY public key", record.PublicKey)
+	case *dns.DS:
+		decoded, err := decodeHex("DS digest", record.Digest)
+		if err != nil {
+			return err
+		}
+		expectedLengths := map[uint8]int{
+			dns.SHA1:   20,
+			dns.SHA256: 32,
+			dns.SHA384: 48,
+		}
+		expected, ok := expectedLengths[record.DigestType]
+		if !ok {
+			return fmt.Errorf("unsupported DS digest type %d", record.DigestType)
+		}
+		if len(decoded) != expected {
+			return fmt.Errorf(
+				"DS digest has length %d bytes, want %d",
+				len(decoded),
+				expected,
+			)
+		}
+	case *dns.RRSIG:
+		return decodeBase64("RRSIG signature", record.Signature)
+	case *dns.NSEC3:
+		if record.Salt != "" {
+			if _, err := decodeHex("NSEC3 salt", record.Salt); err != nil {
+				return err
+			}
+		}
+		if record.Hash != dns.SHA1 {
+			return fmt.Errorf("unsupported NSEC3 hash algorithm %d", record.Hash)
+		}
+		hash, err := base32.HexEncoding.WithPadding(base32.NoPadding).DecodeString(
+			strings.ToUpper(record.NextDomain),
+		)
+		if err != nil {
+			return fmt.Errorf("invalid NSEC3 next owner hash: %w", err)
+		}
+		if len(hash) != 20 {
+			return fmt.Errorf("NSEC3 next owner hash has length %d bytes, want 20", len(hash))
+		}
+	case *dns.NSEC3PARAM:
+		if record.Hash != dns.SHA1 {
+			return fmt.Errorf("unsupported NSEC3PARAM hash algorithm %d", record.Hash)
+		}
+		if record.Salt != "" {
+			if _, err := decodeHex("NSEC3PARAM salt", record.Salt); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func nameWithinZone(name, zone string) bool {
+	name = dns.CanonicalName(name)
+	zone = dns.CanonicalName(zone)
+	if _, ok := dns.IsDomainName(name); !ok {
+		return false
+	}
+	if _, ok := dns.IsDomainName(zone); !ok {
+		return false
+	}
+	nameLabels := dns.SplitDomainName(name)
+	zoneLabels := dns.SplitDomainName(zone)
+	if zoneLabels == nil {
+		return true
+	}
+	if nameLabels == nil {
+		return false
+	}
+	if len(nameLabels) < len(zoneLabels) {
+		return false
+	}
+	for idx := range zoneLabels {
+		nameIdx := len(nameLabels) - len(zoneLabels) + idx
+		if !strings.EqualFold(nameLabels[nameIdx], zoneLabels[idx]) {
+			return false
+		}
+	}
+	return true
 }
 
 func (i *Indexer) handleEventOutputDiscovery(
@@ -488,6 +703,7 @@ func (i *Indexer) handleEventOutputDiscovery(
 		if err != nil {
 			return err
 		}
+		i.watchedMu.Lock()
 		i.watched = append(
 			i.watched,
 			watchedAddr{
@@ -499,6 +715,7 @@ func (i *Indexer) handleEventOutputDiscovery(
 				Address:  scriptAddr.String(),
 			},
 		)
+		i.watchedMu.Unlock()
 		// Add to state
 		err = state.GetState().AddDiscoveredAddress(
 			state.DiscoveredAddress{
@@ -540,12 +757,15 @@ func (i *Indexer) syncStatusLog(stopCh <-chan struct{}) {
 		return
 	default:
 	}
+	i.statusMu.RLock()
+	status := i.syncStatus
+	i.statusMu.RUnlock()
 	slog.Info(
 		fmt.Sprintf(
 			"catch-up sync in progress: at %d.%s (current tip slot is %d)",
-			i.syncStatus.SlotNumber,
-			i.syncStatus.BlockHash,
-			i.syncStatus.TipSlotNumber,
+			status.SlotNumber,
+			status.BlockHash,
+			status.TipSlotNumber,
 		),
 	)
 	i.scheduleSyncStatusLog(stopCh)
