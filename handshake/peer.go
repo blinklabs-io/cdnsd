@@ -18,8 +18,11 @@ import (
 	"time"
 )
 
+var errHeaderChainDoesNotExtend = errors.New("header batch does not extend current locator")
+
 const (
-	dialTimeout = 5 * time.Second
+	dialTimeout        = 5 * time.Second
+	peerRequestTimeout = 5 * time.Second
 
 	protocolVersion            = 1
 	protocolUserAgent          = "/cdnsd/"
@@ -43,6 +46,88 @@ type Peer struct {
 	blockCh      chan Message
 	addrCh       chan Message
 	proofCh      chan Message
+}
+
+func validateHeaderChainFromLocators(
+	headers []*BlockHeader,
+	locators [][32]byte,
+	network Network,
+) error {
+	if len(headers) > maxBlockHeaders {
+		return fmt.Errorf("too many block headers: %d", len(headers))
+	}
+	if len(headers) == 0 {
+		return nil
+	}
+	if headers[0] == nil {
+		return errors.New("header 0 is nil")
+	}
+	firstParentMatches := false
+	for _, locator := range locators {
+		if headers[0].PrevBlock == locator {
+			firstParentMatches = true
+			break
+		}
+	}
+	if !firstParentMatches {
+		return fmt.Errorf(
+			"%w: header 0 PrevBlock %x does not match any locator",
+			errHeaderChainDoesNotExtend,
+			headers[0].PrevBlock,
+		)
+	}
+	// PowLimit is the value actually enforced below, so only derive it from the
+	// compact PowLimitBits when the network does not supply it directly. Doing
+	// the conversion unconditionally would reject a network that configures
+	// PowLimit alone, since CompactToTargetChecked refuses the zero value that
+	// PowLimitBits would then hold.
+	powLimit := network.PowLimit
+	if powLimit == nil {
+		var err error
+		powLimit, err = CompactToTargetChecked(network.PowLimitBits)
+		if err != nil {
+			return fmt.Errorf(
+				"invalid network PoW limit 0x%08x: %w",
+				network.PowLimitBits,
+				err,
+			)
+		}
+	} else if powLimit.Sign() <= 0 || powLimit.BitLen() > 256 {
+		// An explicit limit skips the compact decoder, so it gets the same
+		// bounds check the decoder would have applied. A non-positive limit
+		// would reject every header and stall sync; one wider than 256 bits
+		// would not constrain any hash and would silently disable the gate.
+		return fmt.Errorf(
+			"invalid network PoW limit %s: must be positive and fit in 256 bits",
+			powLimit,
+		)
+	}
+	var expectedPrevious [32]byte
+	for idx, header := range headers {
+		if header == nil {
+			return fmt.Errorf("header %d is nil", idx)
+		}
+		if idx > 0 && header.PrevBlock != expectedPrevious {
+			return fmt.Errorf(
+				"header %d PrevBlock %x does not match expected parent %x",
+				idx,
+				header.PrevBlock,
+				expectedPrevious,
+			)
+		}
+		headerTarget, err := CompactToTargetChecked(header.Bits)
+		if err != nil {
+			return fmt.Errorf("header %d has invalid target: %w", idx, err)
+		}
+		if headerTarget.Cmp(powLimit) > 0 {
+			return fmt.Errorf("header %d target exceeds network PoW limit", idx)
+		}
+		if err := header.ValidatePoW(); err != nil {
+			return fmt.Errorf("header %d PoW validation failed: %w", idx, err)
+		}
+		expectedPrevious = header.Hash()
+	}
+	return nil
 }
 
 // NewPeer returns a new Peer using an existing connection (if provided) and the specified network magic. If a connection is provided,
@@ -269,33 +354,44 @@ func (p *Peer) handshake() error {
 	if err := p.sendMessage(MessageVersion, versionMsg); err != nil {
 		return err
 	}
-	// Wait for Verack response
-	select {
-	case msg := <-p.handshakeCh:
-		if _, ok := msg.(*MsgVerack); !ok {
-			return fmt.Errorf("unexpected message: %T", msg)
+	// Version and Verack may arrive in either order. Send our Verack as soon
+	// as the peer's Version arrives so peers that wait for it before sending
+	// their Verack do not deadlock.
+	versionReceived := false
+	verackReceived := false
+	verackSent := false
+	timeout := time.NewTimer(peerRequestTimeout)
+	defer timeout.Stop()
+	for !versionReceived || !verackReceived {
+		select {
+		case msg := <-p.handshakeCh:
+			switch msg := msg.(type) {
+			case *MsgVersion:
+				if versionReceived {
+					return errors.New("duplicate version message")
+				}
+				versionReceived = true
+				if !verackSent {
+					if err := p.sendMessage(MessageVerack, nil); err != nil {
+						return err
+					}
+					verackSent = true
+				}
+			case *MsgVerack:
+				if verackReceived {
+					return errors.New("duplicate verack message")
+				}
+				verackReceived = true
+			default:
+				return fmt.Errorf("unexpected message: %T", msg)
+			}
+		case err := <-p.errorCh:
+			return fmt.Errorf("handshake failed: %w", err)
+		case <-p.doneCh:
+			return errors.New("connection has shut down")
+		case <-timeout.C:
+			return errors.New("handshake timed out")
 		}
-	case err := <-p.errorCh:
-		return fmt.Errorf("handshake failed: %w", err)
-	case <-time.After(1 * time.Second):
-		return errors.New("handshake timed out")
-	}
-	// Wait for Version from peer
-	select {
-	case msg := <-p.handshakeCh:
-		if _, ok := msg.(*MsgVersion); !ok {
-			return fmt.Errorf("unexpected message: %T", msg)
-		}
-	case err := <-p.errorCh:
-		return fmt.Errorf("handshake failed: %w", err)
-	case <-p.doneCh:
-		return errors.New("connection has shut down")
-	case <-time.After(1 * time.Second):
-		return errors.New("handshake timed out")
-	}
-	// Send Verack
-	if err := p.sendMessage(MessageVerack, nil); err != nil {
-		return err
 	}
 	return nil
 }
@@ -315,7 +411,7 @@ func (p *Peer) GetPeers() ([]NetAddress, error) {
 		return msgAddr.Peers, nil
 	case <-p.doneCh:
 		return nil, errors.New("connection has shut down")
-	case <-time.After(5 * time.Second):
+	case <-time.After(peerRequestTimeout):
 		return nil, errors.New("timed out")
 	}
 }
@@ -342,7 +438,7 @@ func (p *Peer) GetHeaders(
 		return msgHeaders.Headers, nil
 	case <-p.doneCh:
 		return nil, errors.New("connection has shut down")
-	case <-time.After(5 * time.Second):
+	case <-time.After(peerRequestTimeout):
 		return nil, errors.New("timed out")
 	}
 }
@@ -367,7 +463,7 @@ func (p *Peer) GetProof(name string, rootHash [32]byte) (*Proof, error) {
 		return msgProof.Proof, nil
 	case <-p.doneCh:
 		return nil, errors.New("connection has shut down")
-	case <-time.After(5 * time.Second):
+	case <-time.After(peerRequestTimeout):
 		return nil, errors.New("timed out")
 	}
 }
@@ -395,7 +491,7 @@ func (p *Peer) GetBlock(hash [32]byte) (*Block, error) {
 		return msgBlock.Block, nil
 	case <-p.doneCh:
 		return nil, errors.New("connection has shut down")
-	case <-time.After(5 * time.Second):
+	case <-time.After(peerRequestTimeout):
 		return nil, errors.New("timed out")
 	}
 }
@@ -427,7 +523,6 @@ func (p *Peer) Sync(locator [][32]byte, syncFunc SyncFunc) error {
 		err := func() error {
 			nextLocator := locator
 			reachedTip := false
-		syncLoop:
 			for {
 				// Explicitly request headers on initial or catch-up sync
 				if !reachedTip {
@@ -447,16 +542,38 @@ func (p *Peer) Sync(locator [][32]byte, syncFunc SyncFunc) error {
 					if !ok {
 						return fmt.Errorf("unexpected message: %T", msg)
 					}
+					if len(nextLocator) == 0 {
+						return errors.New("sync locator is empty")
+					}
+					if err := validateHeaderChainFromLocators(
+						msgHeaders.Headers,
+						nextLocator,
+						p.network,
+					); err != nil {
+						if errors.Is(err, errHeaderChainDoesNotExtend) {
+							reachedTip = false
+							continue
+						}
+						return fmt.Errorf("invalid header batch: %w", err)
+					}
 					// Fetch block for each header
 					for _, header := range msgHeaders.Headers {
-						// Switch back to initial sync mode if we get header that doesn't fit on last known block
-						if nextLocator[0] != header.PrevBlock {
-							reachedTip = false
-							continue syncLoop
-						}
 						blk, err := p.GetBlock(header.Hash())
 						if err != nil {
 							return err
+						}
+						if blk == nil {
+							return errors.New("peer returned a nil block")
+						}
+						if blk.Header != *header {
+							return fmt.Errorf(
+								"peer returned block header %x for requested header %x",
+								blk.Hash(),
+								header.Hash(),
+							)
+						}
+						if err := blk.ValidatePoW(); err != nil {
+							return fmt.Errorf("fetched block PoW validation failed: %w", err)
 						}
 						// Call user callback with block
 						if err := syncFunc(blk); err != nil {
