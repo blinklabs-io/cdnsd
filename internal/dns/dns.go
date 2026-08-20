@@ -33,6 +33,8 @@ var errMaxReferralDepth = errors.New(
 	"maximum referral depth reached",
 )
 
+const maxConcurrentNameserverQueries = 2
+
 var metricQueryTotal = promauto.NewCounter(prometheus.CounterOpts{
 	Name: "dns_query_total",
 	Help: "total DNS queries handled",
@@ -46,6 +48,19 @@ type Resolver struct {
 	trustAnchors      map[string][]dns.RR
 	rootAnchorManager *rootAnchorManager
 	recursionNetworks []*net.IPNet
+	exchangeFn        func(context.Context, *dns.Msg, string, time.Duration) (*dns.Msg, error)
+}
+
+func (r *Resolver) exchange(
+	ctx context.Context,
+	msg *dns.Msg,
+	address string,
+	timeout time.Duration,
+) (*dns.Msg, error) {
+	if r != nil && r.exchangeFn != nil {
+		return r.exchangeFn(ctx, msg, address, timeout)
+	}
+	return exchangeDNS(ctx, msg, address, timeout)
 }
 
 // NewResolver creates a resolver from the provided config.
@@ -80,6 +95,7 @@ type resolutionContext struct {
 	visited    map[string]bool
 	validation *dnssecValidation
 	requestCtx context.Context
+	querySlots chan struct{}
 }
 
 //nolint:unused // Retained as a context-free compatibility helper for tests.
@@ -97,6 +113,7 @@ func newResolutionContextWithContext(requestCtx context.Context) *resolutionCont
 		maxDepth:   10,
 		visited:    make(map[string]bool),
 		requestCtx: requestCtx,
+		querySlots: make(chan struct{}, maxConcurrentNameserverQueries),
 	}
 }
 
@@ -197,6 +214,7 @@ func (c *resolutionContext) descend() *resolutionContext {
 		visited:    newVisited,
 		validation: c.validation,
 		requestCtx: c.requestCtx,
+		querySlots: c.querySlots,
 	}
 }
 
@@ -274,103 +292,48 @@ func (r *Resolver) resolveNameserverAddress(
 		childCtx.validation = validation
 	}
 
-	// Start from root hints and resolve iteratively. Keep IPv4 roots first for
-	// the usual case, but query all root addresses concurrently so a network
-	// that silently drops IPv4 packets can still use an IPv6 root promptly.
+	// Start from root hints and resolve iteratively. Transport exchanges are
+	// bounded and referrals are followed only by the caller, so a referral that
+	// needs more glue cannot recursively fan out from every root attempt.
 	rootServers := r.rootServers()
 	if len(rootServers) == 0 {
 		return nil, errors.New("no root servers available")
 	}
-
-	rootCtx, cancel := context.WithCancel(requestContext(ctx))
-	defer cancel()
-	type rootResult struct {
-		ips []net.IP
-		err error
-	}
-	results := make(chan rootResult, len(rootServers))
-	validationTimeout := configuredDuration(
-		config.GetConfig().Dns.QueryTimeoutMs,
-		5*time.Second,
-		30*time.Second,
-	)
-	prepareValidation := func(rootNS string) (*dnssecValidation, error) {
-		// Each root gets an independent validation state so a slow or
-		// unreachable root cannot hold every alternate root behind its
-		// DNSKEY exchange. The trust anchors are immutable for this lookup;
-		// only the per-root key cache is populated by ensureDNSSECKeys.
-		validation := childCtx.validation.clone()
-		if validation != nil &&
-			!validation.insecure &&
-			len(validation.keys) == 0 {
-			if err := r.ensureDNSSECKeys(
-				rootCtx,
-				validation,
-				rootNS,
-				validationTimeout,
-			); err != nil {
-				return nil, err
-			}
-		}
-		return validation, nil
-	}
-	for _, rootNS := range rootServers {
-		go func(rootNS string) {
-			rootChildCtx := *childCtx
-			validation, err := prepareValidation(rootNS)
-			if err != nil {
-				results <- rootResult{err: err}
-				return
-			}
-			rootChildCtx.validation = validation
-			rootChildCtx.requestCtx = rootCtx
-			var rootIPs []net.IP
-			var lastErr error
-			// Query both address families. A nameserver may be IPv6-only,
-			// and dual-stack glue is useful for transport failover.
-			for _, queryType := range []uint16{dns.TypeA, dns.TypeAAAA} {
-				if err := rootCtx.Err(); err != nil {
-					results <- rootResult{err: err}
-					return
-				}
-				msg := new(dns.Msg)
-				msg.SetQuestion(nsName, queryType)
-				msg.RecursionDesired = true
-				// rootChildCtx carries rootCtx through the resolution context.
-				resp, err := r.doQueryWithContext(msg, rootNS, true, &rootChildCtx) //nolint:contextcheck
-				if err != nil {
-					lastErr = fmt.Errorf("query root %s for %s: %w", rootNS, nsName, err)
-					continue
-				}
-				if resp == nil {
-					lastErr = fmt.Errorf("received nil response for %s", nsName)
-					continue
-				}
-				for _, rr := range resp.Answer {
-					switch v := rr.(type) {
-					case *dns.A:
-						rootIPs = append(rootIPs, v.A)
-					case *dns.AAAA:
-						rootIPs = append(rootIPs, v.AAAA)
-					}
-				}
-			}
-			results <- rootResult{ips: rootIPs, err: lastErr}
-		}(rootNS)
-	}
-
 	var lastErr error
-	for range rootServers {
-		result := <-results
-		if len(result.ips) > 0 {
-			return result.ips, nil
+	// Query both address families. A nameserver may be IPv6-only, and
+	// dual-stack glue is useful for transport failover.
+	for _, queryType := range []uint16{dns.TypeA, dns.TypeAAAA} {
+		msg := new(dns.Msg)
+		msg.SetQuestion(nsName, queryType)
+		msg.RecursionDesired = true
+		resp, err := r.queryNameserverAddresses(
+			msg,
+			rootServers,
+			true,
+			childCtx,
+		)
+		if err != nil {
+			lastErr = err
+			continue
 		}
-		if result.err != nil {
-			lastErr = result.err
+		if resp == nil {
+			lastErr = fmt.Errorf("received nil response for %s", nsName)
+			continue
+		}
+		for _, rr := range resp.Answer {
+			switch v := rr.(type) {
+			case *dns.A:
+				ips = append(ips, v.A)
+			case *dns.AAAA:
+				ips = append(ips, v.AAAA)
+			}
 		}
 	}
 
-	if len(ips) == 0 && lastErr != nil {
+	if len(ips) > 0 {
+		return ips, nil
+	}
+	if lastErr != nil {
 		return nil, fmt.Errorf("upstream resolution failed for %s: %w", nsName, lastErr)
 	}
 	return nil, fmt.Errorf("no A/AAAA records in upstream response for %s", nsName)
@@ -769,21 +732,22 @@ func (r *Resolver) handleQuery(w dns.ResponseWriter, req *dns.Msg) {
 	if req == nil {
 		return
 	}
+	cfg := config.GetConfig()
+	recursionAvailable := cfg.Dns.RecursionEnabled && r.recursionAllowed(w)
 	if len(req.Question) != 1 {
-		writeFormatError(w, req, config.GetConfig().Dns.RecursionEnabled)
+		writeFormatError(w, req, recursionAvailable)
 		return
 	}
 
-	cfg := config.GetConfig()
 	question := req.Question[0]
 	if question.Qclass != dns.ClassINET {
-		writeRcode(w, req, dns.RcodeNotImplemented, cfg.Dns.RecursionEnabled)
+		writeRcode(w, req, dns.RcodeNotImplemented, recursionAvailable)
 		return
 	}
 	canonicalName := canonicalDNSName(question.Name)
 	lookupName := strings.TrimSuffix(canonicalName, ".")
 	m := new(dns.Msg)
-	m.RecursionAvailable = cfg.Dns.RecursionEnabled
+	m.RecursionAvailable = recursionAvailable
 
 	if cfg.Logging.QueryLog {
 		for _, q := range req.Question {
@@ -836,7 +800,7 @@ func (r *Resolver) handleQuery(w dns.ResponseWriter, req *dns.Msg) {
 		if records != nil {
 			// Assemble response
 			m.SetReply(req)
-			m.RecursionAvailable = cfg.Dns.RecursionEnabled
+			m.RecursionAvailable = recursionAvailable
 			m.Authoritative = true
 			for _, tmpRecord := range records {
 				tmpRR, err := stateRecordToDnsRR(tmpRecord)
@@ -885,7 +849,7 @@ func (r *Resolver) handleQuery(w dns.ResponseWriter, req *dns.Msg) {
 		zone := findZoneForName(canonicalName)
 		if zone != "" {
 			m.SetReply(req)
-			m.RecursionAvailable = cfg.Dns.RecursionEnabled
+			m.RecursionAvailable = recursionAvailable
 			m.Authoritative = true
 			soa := generateSyntheticSOA(zone)
 			m.Answer = append(
@@ -904,11 +868,7 @@ func (r *Resolver) handleQuery(w dns.ResponseWriter, req *dns.Msg) {
 		}
 	}
 
-	recursiveRequested := cfg.Dns.RecursionEnabled && req.RecursionDesired
-	if recursiveRequested && !r.recursionAllowed(w) {
-		writeRcode(w, req, dns.RcodeRefused, true)
-		return
-	}
+	recursiveRequested := recursionAvailable && req.RecursionDesired
 	requestCtx := context.Background()
 	if recursiveRequested {
 		var cancel context.CancelFunc
@@ -938,7 +898,7 @@ func (r *Resolver) handleQuery(w dns.ResponseWriter, req *dns.Msg) {
 	if len(nameservers) > 0 && (recursiveRequested || nameserverDomain != ".") {
 		// Assemble response
 		m.SetReply(req)
-		m.RecursionAvailable = cfg.Dns.RecursionEnabled
+		m.RecursionAvailable = recursionAvailable
 		if recursiveRequested {
 			ctx := newResolutionContextWithContext(requestCtx)
 			if r.dnssecEnabled && !req.CheckingDisabled {
@@ -948,7 +908,7 @@ func (r *Resolver) handleQuery(w dns.ResponseWriter, req *dns.Msg) {
 				)
 				if validationErr != nil {
 					m.SetRcode(req, dns.RcodeServerFailure)
-					m.RecursionAvailable = cfg.Dns.RecursionEnabled
+					m.RecursionAvailable = recursionAvailable
 					if writeErr := w.WriteMsg(m); writeErr != nil {
 						slog.Error(
 							fmt.Sprintf(
@@ -979,7 +939,7 @@ func (r *Resolver) handleQuery(w dns.ResponseWriter, req *dns.Msg) {
 			if err != nil {
 				// Send failure response
 				m.SetRcode(req, dns.RcodeServerFailure)
-				m.RecursionAvailable = cfg.Dns.RecursionEnabled
+				m.RecursionAvailable = recursionAvailable
 				if err := w.WriteMsg(m); err != nil {
 					slog.Error(
 						fmt.Sprintf(
@@ -998,7 +958,7 @@ func (r *Resolver) handleQuery(w dns.ResponseWriter, req *dns.Msg) {
 				return
 			}
 			copyResponse(req, resp, m)
-			m.RecursionAvailable = cfg.Dns.RecursionEnabled
+			m.RecursionAvailable = recursionAvailable
 			// Send response
 			if err := w.WriteMsg(m); err != nil {
 				slog.Error(
@@ -1051,11 +1011,11 @@ func (r *Resolver) handleQuery(w dns.ResponseWriter, req *dns.Msg) {
 	// avoids poisoning a client's negative cache for unrelated names.
 	zone := findZoneForName(canonicalName)
 	if zone == "" {
-		writeRcode(w, req, dns.RcodeRefused, cfg.Dns.RecursionEnabled)
+		writeRcode(w, req, dns.RcodeRefused, recursionAvailable)
 		return
 	}
 	m.SetRcode(req, dns.RcodeNameError)
-	m.RecursionAvailable = cfg.Dns.RecursionEnabled
+	m.RecursionAvailable = recursionAvailable
 	if zone != "" {
 		m.Authoritative = true
 		fromHandshake, sourceErr := localZoneUsesHandshake(zone)
@@ -1513,9 +1473,6 @@ func (r *Resolver) queryMultipleNameserversWithPort(
 	ctx *resolutionContext,
 	port string,
 ) (*dns.Msg, error) {
-	cfg := config.GetConfig()
-	queryCtx := requestContext(ctx)
-
 	// Flatten nameservers into a list of addresses,
 	// preferring IPv4 over IPv6
 	ipv4Addrs := make([]string, 0)
@@ -1544,20 +1501,53 @@ func (r *Resolver) queryMultipleNameserversWithPort(
 	shuffleStrings(ipv4Addrs)
 	shuffleStrings(ipv6Addrs)
 
-	// Prefer IPv4, fall back to IPv6 if all IPv4 fail
+	// Start one address from each family before the remaining candidates. The
+	// bounded workers retain IPv4 preference without letting a silently dropped
+	// IPv4 packet prevent an IPv6 attempt from starting.
 	addresses := make(
 		[]string,
 		0,
 		len(ipv4Addrs)+len(ipv6Addrs),
 	)
-	addresses = append(addresses, ipv4Addrs...)
-	addresses = append(addresses, ipv6Addrs...)
+	for idx := 0; idx < max(len(ipv4Addrs), len(ipv6Addrs)); idx++ {
+		if idx < len(ipv4Addrs) {
+			addresses = append(addresses, ipv4Addrs[idx])
+		}
+		if idx < len(ipv6Addrs) {
+			addresses = append(addresses, ipv6Addrs[idx])
+		}
+	}
+	return r.queryNameserverAddresses(msg, addresses, recursive, ctx)
+}
 
+type nameserverQueryResult struct {
+	address  string
+	response *dns.Msg
+	err      error
+}
+
+func (r *Resolver) queryNameserverAddresses(
+	msg *dns.Msg,
+	addresses []string,
+	recursive bool,
+	ctx *resolutionContext,
+) (*dns.Msg, error) {
 	if len(addresses) == 0 {
 		return nil, errors.New("no nameserver addresses available")
 	}
+	if ctx == nil {
+		ctx = newResolutionContext()
+	}
+	if msg == nil {
+		return nil, errors.New("nil DNS query")
+	}
+	addresses = interleaveNameserverAddresses(addresses)
+	queryCtx := requestContext(ctx)
+	if err := queryCtx.Err(); err != nil {
+		return nil, err
+	}
 
-	var lastErr error
+	cfg := config.GetConfig()
 	retryCount := cfg.Dns.RetryCount
 	if retryCount <= 0 {
 		retryCount = 1
@@ -1571,116 +1561,107 @@ func (r *Resolver) queryMultipleNameserversWithPort(
 		5*time.Second,
 		30*time.Second,
 	)
-
-	for _, addr := range addresses {
-		if err := queryCtx.Err(); err != nil {
-			return nil, err
-		}
-		exchangeTimeout := timeout
-		if deadline, ok := queryCtx.Deadline(); ok {
-			remaining := time.Until(deadline)
-			if remaining <= 0 {
-				if err := queryCtx.Err(); err != nil {
-					return nil, err
-				}
-				return nil, context.DeadlineExceeded
-			}
-			if remaining < exchangeTimeout {
-				exchangeTimeout = remaining
-			}
-		}
-		if r.dnssecEnabled && !msg.CheckingDisabled {
-			if err := r.ensureDNSSECKeys(
-				queryCtx,
-				ctx.validation,
-				addr,
-				exchangeTimeout,
-			); err != nil {
-				slog.Debug(
-					"DNSSEC key authentication failed",
-					"address",
-					addr,
-					"error",
-					err,
-				)
-				lastErr = err
-				continue
-			}
-		}
-		queryFn := func() (*dns.Msg, error) {
-			outbound := msg
-			if r.dnssecEnabled || wantsDNSSEC(msg) {
-				outbound = dnssecQuery(msg)
-			}
-			resp, exchangeErr := exchangeDNS(
-				queryCtx,
-				outbound,
-				addr,
-				exchangeTimeout,
-			)
-			if exchangeErr != nil {
-				return nil, exchangeErr
-			}
-			if resp == nil {
-				return nil, fmt.Errorf(
-					"nil response from %s",
-					addr,
-				)
-			}
-			// Treat SERVFAIL/REFUSED as retryable errors
-			if resp.Rcode == dns.RcodeServerFailure ||
-				resp.Rcode == dns.RcodeRefused {
-				return nil, fmt.Errorf(
-					"server %s returned %s",
-					addr,
-					dns.RcodeToString[resp.Rcode],
-				)
-			}
-			return resp, nil
-		}
-
-		resp, err := queryWithRetryContext(
+	if r.dnssecEnabled && !msg.CheckingDisabled {
+		validation, err := r.prepareDNSSECValidation(
 			queryCtx,
-			queryFn,
-			retryCount,
-			baseDelay,
+			ctx.validation,
+			addresses,
+			timeout,
+			ctx.querySlots,
 		)
 		if err != nil {
+			return nil, err
+		}
+		ctx.validation = validation
+	}
+
+	runCtx, cancel := context.WithCancel(queryCtx)
+	defer cancel()
+	jobs := make(chan string, len(addresses))
+	results := make(chan nameserverQueryResult)
+	for _, address := range addresses {
+		jobs <- address
+	}
+	close(jobs)
+	workerCount := min(maxConcurrentNameserverQueries, len(addresses))
+	var workers sync.WaitGroup
+	workers.Add(workerCount)
+	for range workerCount {
+		go func() {
+			defer workers.Done()
+			for address := range jobs {
+				response, err := r.queryNameserverAddress(
+					runCtx,
+					msg,
+					address,
+					timeout,
+					retryCount,
+					baseDelay,
+					ctx.querySlots,
+				)
+				result := nameserverQueryResult{
+					address:  address,
+					response: response,
+					err:      err,
+				}
+				select {
+				case results <- result:
+				case <-runCtx.Done():
+					return
+				}
+			}
+		}()
+	}
+	go func() {
+		workers.Wait()
+		close(results)
+	}()
+
+	var errs []error
+	for result := range results {
+		if result.err != nil {
 			slog.Debug(
-				fmt.Sprintf(
-					"nameserver query failed: address=%s, error=%s",
-					addr,
-					err,
-				),
+				"nameserver query failed",
+				"address",
+				result.address,
+				"error",
+				result.err,
 			)
-			lastErr = err
+			errs = append(errs, result.err)
 			continue
 		}
+		resp := result.response
 		if resp == nil {
-			lastErr = fmt.Errorf("nameserver %s returned a nil response", addr)
+			errs = append(
+				errs,
+				fmt.Errorf("nameserver %s returned a nil response", result.address),
+			)
 			continue
 		}
+		candidateCtx := *ctx
+		candidateCtx.requestCtx = runCtx
+		candidateCtx.validation = ctx.validation.clone()
 
 		// If recursive and got a referral, follow it
 		if recursive &&
 			!resp.Authoritative &&
 			len(getNameserversFromResponse(resp)) > 0 {
-			result, referralErr := r.handleReferral(
+			referralResponse, referralErr := r.handleReferral(
 				msg,
 				resp,
-				ctx,
+				&candidateCtx,
 			)
 			if referralErr == nil {
-				return result, nil
+				return referralResponse, nil
 			}
 			slog.Debug(
 				fmt.Sprintf(
 					"referral failed: address=%s, error=%s",
-					addr,
+					result.address,
 					referralErr,
 				),
 			)
-			lastErr = referralErr
+			errs = append(errs, referralErr)
 			continue
 		}
 
@@ -1688,17 +1669,17 @@ func (r *Resolver) queryMultipleNameserversWithPort(
 			authenticated, validationErr := r.validateFinalResponse(
 				msg,
 				resp,
-				ctx.validation,
+				candidateCtx.validation,
 			)
 			if validationErr != nil {
 				slog.Debug(
 					"DNSSEC response validation failed",
 					"address",
-					addr,
+					result.address,
 					"error",
 					validationErr,
 				)
-				lastErr = validationErr
+				errs = append(errs, validationErr)
 				continue
 			}
 			resp.AuthenticatedData = authenticated
@@ -1708,9 +1689,201 @@ func (r *Resolver) queryMultipleNameserversWithPort(
 		return resp, nil
 	}
 
+	if len(errs) == 0 {
+		return nil, errors.New("all nameservers returned unusable responses")
+	}
+	return nil, fmt.Errorf("all nameservers failed: %w", errors.Join(errs...))
+}
+
+func interleaveNameserverAddresses(addresses []string) []string {
+	ipv4 := make([]string, 0, len(addresses))
+	ipv6 := make([]string, 0, len(addresses))
+	other := make([]string, 0)
+	for _, address := range addresses {
+		host, _, err := net.SplitHostPort(address)
+		if err != nil {
+			host = address
+		}
+		ip := net.ParseIP(host)
+		switch {
+		case ip == nil:
+			other = append(other, address)
+		case ip.To4() != nil:
+			ipv4 = append(ipv4, address)
+		default:
+			ipv6 = append(ipv6, address)
+		}
+	}
+	ret := make([]string, 0, len(addresses))
+	for idx := 0; idx < max(len(ipv4), len(ipv6)); idx++ {
+		if idx < len(ipv4) {
+			ret = append(ret, ipv4[idx])
+		}
+		if idx < len(ipv6) {
+			ret = append(ret, ipv6[idx])
+		}
+	}
+	return append(ret, other...)
+}
+
+func (r *Resolver) queryNameserverAddress(
+	ctx context.Context,
+	msg *dns.Msg,
+	address string,
+	timeout time.Duration,
+	retryCount int,
+	baseDelay time.Duration,
+	querySlots chan struct{},
+) (*dns.Msg, error) {
+	release, err := acquireNameserverQuerySlot(ctx, querySlots)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	exchangeTimeout, err := exchangeTimeout(ctx, timeout)
+	if err != nil {
+		return nil, err
+	}
+	queryFn := func() (*dns.Msg, error) {
+		outbound := msg
+		if r.dnssecEnabled || wantsDNSSEC(msg) {
+			outbound = dnssecQuery(msg)
+		}
+		resp, exchangeErr := r.exchange(
+			ctx,
+			outbound,
+			address,
+			exchangeTimeout,
+		)
+		if exchangeErr != nil {
+			return nil, exchangeErr
+		}
+		if resp == nil {
+			return nil, fmt.Errorf("nil response from %s", address)
+		}
+		if resp.Rcode == dns.RcodeServerFailure ||
+			resp.Rcode == dns.RcodeRefused {
+			return nil, fmt.Errorf(
+				"server %s returned %s",
+				address,
+				dns.RcodeToString[resp.Rcode],
+			)
+		}
+		return resp, nil
+	}
+	return queryWithRetryContext(ctx, queryFn, retryCount, baseDelay)
+}
+
+func acquireNameserverQuerySlot(
+	ctx context.Context,
+	querySlots chan struct{},
+) (func(), error) {
+	if querySlots == nil {
+		return func() {}, nil
+	}
+	select {
+	case querySlots <- struct{}{}:
+		return func() { <-querySlots }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func exchangeTimeout(ctx context.Context, maximum time.Duration) (time.Duration, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			if err := ctx.Err(); err != nil {
+				return 0, err
+			}
+			return 0, context.DeadlineExceeded
+		}
+		if remaining < maximum {
+			return remaining, nil
+		}
+	}
+	return maximum, nil
+}
+
+func (r *Resolver) prepareDNSSECValidation(
+	ctx context.Context,
+	validation *dnssecValidation,
+	addresses []string,
+	timeout time.Duration,
+	querySlots chan struct{},
+) (*dnssecValidation, error) {
+	if validation == nil || validation.insecure || len(validation.keys) > 0 {
+		return validation, nil
+	}
+	prepareCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type validationResult struct {
+		validation *dnssecValidation
+		err        error
+	}
+	jobs := make(chan string, len(addresses))
+	results := make(chan validationResult)
+	for _, address := range addresses {
+		jobs <- address
+	}
+	close(jobs)
+	workerCount := min(maxConcurrentNameserverQueries, len(addresses))
+	var workers sync.WaitGroup
+	workers.Add(workerCount)
+	for range workerCount {
+		go func() {
+			defer workers.Done()
+			for address := range jobs {
+				candidate := validation.clone()
+				release, err := acquireNameserverQuerySlot(
+					prepareCtx,
+					querySlots,
+				)
+				if err == nil {
+					var queryTimeout time.Duration
+					queryTimeout, err = exchangeTimeout(prepareCtx, timeout)
+					if err == nil {
+						err = r.ensureDNSSECKeys(
+							prepareCtx,
+							candidate,
+							address,
+							queryTimeout,
+						)
+					}
+					release()
+				}
+				select {
+				case results <- validationResult{validation: candidate, err: err}:
+					if err == nil {
+						return
+					}
+				case <-prepareCtx.Done():
+					return
+				}
+			}
+		}()
+	}
+	go func() {
+		workers.Wait()
+		close(results)
+	}()
+	var errs []error
+	for result := range results {
+		if result.err == nil {
+			cancel()
+			return result.validation, nil
+		}
+		errs = append(errs, result.err)
+	}
+	if err := prepareCtx.Err(); err != nil {
+		return nil, err
+	}
 	return nil, fmt.Errorf(
-		"all nameservers failed: %w",
-		lastErr,
+		"DNSSEC key authentication failed for all nameservers: %w",
+		errors.Join(errs...),
 	)
 }
 
@@ -1785,54 +1958,6 @@ func (r *Resolver) handleReferral(
 		nameservers,
 		true,
 		childCtx,
-	)
-}
-
-// doQueryWithContext performs a DNS query with resolution
-// context for depth tracking. It uses retry logic and
-// configurable timeouts.
-func (r *Resolver) doQueryWithContext(
-	msg *dns.Msg,
-	address string,
-	recursive bool,
-	ctx *resolutionContext,
-) (*dns.Msg, error) {
-	if ctx == nil {
-		ctx = newResolutionContextWithContext(requestContext(ctx))
-	}
-	if err := requestContext(ctx).Err(); err != nil {
-		return nil, err
-	}
-	if ctx.atMaxDepth() {
-		return nil, errors.New("max resolution depth exceeded")
-	}
-
-	// Parse host and port, defaulting to port 53
-	host, port, err := net.SplitHostPort(address)
-	if err != nil {
-		// No port specified, treat as host-only
-		host = address
-		port = "53"
-	}
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return nil, fmt.Errorf(
-			"invalid IP address: %s",
-			host,
-		)
-	}
-
-	// Create nameserver map with single entry
-	nameservers := map[string][]net.IP{
-		"initial": {ip},
-	}
-
-	return r.queryMultipleNameserversWithPort(
-		msg,
-		nameservers,
-		recursive,
-		ctx,
-		port,
 	)
 }
 

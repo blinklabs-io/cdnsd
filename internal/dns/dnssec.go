@@ -263,7 +263,7 @@ func (r *Resolver) ensureDNSSECKeys(
 
 	msg := new(dns.Msg)
 	msg.SetQuestion(validation.zone, dns.TypeDNSKEY)
-	resp, err := exchangeDNS(ctx, dnssecQuery(msg), address, timeout)
+	resp, err := r.exchange(ctx, dnssecQuery(msg), address, timeout)
 	if err != nil {
 		return fmt.Errorf("%w: fetch DNSKEY for %s: %w",
 			errDNSSECBogus,

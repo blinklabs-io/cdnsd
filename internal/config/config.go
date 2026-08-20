@@ -19,6 +19,13 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+const (
+	defaultDNSQueryTimeoutMs     = 5000
+	maximumDNSQueryTimeoutMs     = 30000
+	defaultDNSRecursionTimeoutMs = 10000
+	maximumDNSRecursionTimeoutMs = 120000
+)
+
 type Config struct {
 	Logging  LoggingConfig `yaml:"logging"`
 	Metrics  MetricsConfig `yaml:"metrics"`
@@ -127,8 +134,8 @@ var globalConfig = &Config{
 		RootHints:          string(defaultRootHints),
 		RetryCount:         3,
 		RetryDelayMs:       100,
-		QueryTimeoutMs:     5000,
-		RecursionTimeoutMs: 10000,
+		QueryTimeoutMs:     defaultDNSQueryTimeoutMs,
+		RecursionTimeoutMs: defaultDNSRecursionTimeoutMs,
 		DNSSEC: DNSSECConfig{
 			TrustAnchors:              string(defaultTrustAnchors),
 			RootAnchorRefreshInterval: 24 * time.Hour,
@@ -241,17 +248,17 @@ func Load(configFile string) (*Config, error) {
 	if globalConfig.Dns.RetryDelayMs > 10000 {
 		globalConfig.Dns.RetryDelayMs = 10000
 	}
-	if globalConfig.Dns.QueryTimeoutMs <= 0 {
-		globalConfig.Dns.QueryTimeoutMs = 5000
+	if globalConfig.Dns.QueryTimeoutMs < defaultDNSQueryTimeoutMs {
+		globalConfig.Dns.QueryTimeoutMs = defaultDNSQueryTimeoutMs
 	}
-	if globalConfig.Dns.QueryTimeoutMs > 30000 {
-		globalConfig.Dns.QueryTimeoutMs = 30000
+	if globalConfig.Dns.QueryTimeoutMs > maximumDNSQueryTimeoutMs {
+		globalConfig.Dns.QueryTimeoutMs = maximumDNSQueryTimeoutMs
 	}
-	if globalConfig.Dns.RecursionTimeoutMs <= 0 {
-		globalConfig.Dns.RecursionTimeoutMs = 10000
+	if globalConfig.Dns.RecursionTimeoutMs < defaultDNSRecursionTimeoutMs {
+		globalConfig.Dns.RecursionTimeoutMs = defaultDNSRecursionTimeoutMs
 	}
-	if globalConfig.Dns.RecursionTimeoutMs > 120000 {
-		globalConfig.Dns.RecursionTimeoutMs = 120000
+	if globalConfig.Dns.RecursionTimeoutMs > maximumDNSRecursionTimeoutMs {
+		globalConfig.Dns.RecursionTimeoutMs = maximumDNSRecursionTimeoutMs
 	}
 	if len(globalConfig.Dns.RecursionAllowlist) == 0 {
 		globalConfig.Dns.RecursionAllowlist = slices.Clone(defaultRecursionAllowlist)

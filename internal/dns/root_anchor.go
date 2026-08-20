@@ -88,7 +88,11 @@ func (m *rootAnchorManager) load() {
 	value, err := state.GetState().GetDNSSECRootAnchorState()
 	if err != nil {
 		if !errors.Is(err, state.ErrStateNotLoaded) {
-			slog.Warn("failed to load persisted DNSSEC root trust-anchor state", "error", err)
+			slog.Warn(
+				"failed to load persisted DNSSEC root trust-anchor state",
+				"error",
+				err,
+			)
 		}
 		return
 	}
@@ -96,8 +100,13 @@ func (m *rootAnchorManager) load() {
 		return
 	}
 	var persisted persistedRootAnchorState
-	if err := json.Unmarshal(value, &persisted); err != nil || persisted.Version != 1 {
-		slog.Warn("ignoring invalid persisted DNSSEC root trust-anchor state", "error", err)
+	if err := json.Unmarshal(value, &persisted); err != nil ||
+		persisted.Version != 1 {
+		slog.Warn(
+			"ignoring invalid persisted DNSSEC root trust-anchor state",
+			"error",
+			err,
+		)
 		return
 	}
 	for _, anchor := range persisted.Anchors {
@@ -106,7 +115,11 @@ func (m *rootAnchorManager) load() {
 			anchor.Status != rootAnchorValid &&
 			anchor.Status != rootAnchorPendingRemove
 		if err != nil || !supportedTrustAnchor(rr) || invalidStatus {
-			slog.Warn("ignoring invalid persisted DNSSEC root trust anchor", "record", anchor.Record)
+			slog.Warn(
+				"ignoring invalid persisted DNSSEC root trust anchor",
+				"record",
+				anchor.Record,
+			)
 			continue
 		}
 		m.anchors = append(m.anchors, anchor)
@@ -114,10 +127,14 @@ func (m *rootAnchorManager) load() {
 	m.lastRefresh = persisted.LastRefresh
 }
 
-func (m *rootAnchorManager) fetchRootDNSKEY(ctx context.Context) (*dns.Msg, error) {
+func (m *rootAnchorManager) fetchRootDNSKEY(
+	ctx context.Context,
+) (*dns.Msg, error) {
 	addresses := m.resolver.rootServers()
 	if len(addresses) == 0 {
-		return nil, errors.New("no root server available for trust-anchor refresh")
+		return nil, errors.New(
+			"no root server available for trust-anchor refresh",
+		)
 	}
 	timeout := time.Duration(m.config.Dns.QueryTimeoutMs) * time.Millisecond
 	queryCtx, cancel := context.WithCancel(ctx)
@@ -126,29 +143,91 @@ func (m *rootAnchorManager) fetchRootDNSKEY(ctx context.Context) (*dns.Msg, erro
 		response *dns.Msg
 		err      error
 	}
-	results := make(chan result, len(addresses))
+	jobs := make(chan string, len(addresses))
+	results := make(chan result)
 	for _, address := range addresses {
-		go func(address string) {
-			query := new(dns.Msg)
-			query.SetQuestion(".", dns.TypeDNSKEY)
-			response, err := exchangeDNS(queryCtx, dnssecQuery(query), address, timeout)
-			results <- result{response: response, err: err}
-		}(address)
+		jobs <- address
 	}
+	close(jobs)
+	workerCount := min(maxConcurrentNameserverQueries, len(addresses))
+	var workers sync.WaitGroup
+	workers.Add(workerCount)
+	for range workerCount {
+		go func() {
+			defer workers.Done()
+			for address := range jobs {
+				query := new(dns.Msg)
+				query.SetQuestion(".", dns.TypeDNSKEY)
+				response, err := m.resolver.exchange(
+					queryCtx,
+					dnssecQuery(query),
+					address,
+					timeout,
+				)
+				select {
+				case results <- result{response: response, err: err}:
+				case <-queryCtx.Done():
+					return
+				}
+			}
+		}()
+	}
+	go func() {
+		workers.Wait()
+		close(results)
+	}()
 	var errs []error
-	for range addresses {
-		result := <-results
-		if result.err == nil && result.response != nil {
-			return result.response, nil
-		}
+	for result := range results {
 		if result.err != nil {
 			errs = append(errs, result.err)
+			continue
 		}
+		if err := m.authenticateRootDNSKEYResponse(result.response); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		cancel()
+		return result.response, nil
 	}
 	if len(errs) > 0 {
-		return nil, fmt.Errorf("all root servers failed: %w", errors.Join(errs...))
+		return nil, fmt.Errorf(
+			"all root servers failed: %w",
+			errors.Join(errs...),
+		)
 	}
-	return nil, errors.New("all root servers returned empty responses")
+	return nil, errors.New(
+		"all root servers returned unusable DNSKEY responses",
+	)
+}
+
+func usableRootDNSKEYResponse(response *dns.Msg) bool {
+	return response != nil &&
+		response.Rcode == dns.RcodeSuccess &&
+		len(dnskeysFrom(response.Answer, ".")) > 0
+}
+
+func (m *rootAnchorManager) authenticateRootDNSKEYResponse(
+	response *dns.Msg,
+) error {
+	if !usableRootDNSKEYResponse(response) {
+		return fmt.Errorf(
+			"root server returned unusable DNSKEY response: %s",
+			rcodeString(response),
+		)
+	}
+	keys := dnskeysFrom(response.Answer, ".")
+	if err := authenticateDNSKEYSet(
+		toRRs(keys),
+		signaturesFor(response.Answer, ".", dns.TypeDNSKEY),
+		keys,
+		m.currentAnchors(),
+	); err != nil {
+		return fmt.Errorf(
+			"root server returned unauthenticated DNSKEY response: %w",
+			err,
+		)
+	}
+	return nil
 }
 
 func (m *rootAnchorManager) currentAnchors() []dns.RR {
@@ -179,7 +258,12 @@ func rootAnchorKey(key *dns.DNSKEY) string {
 	}
 	normalized := *key
 	normalized.Flags &^= dns.REVOKE
-	return fmt.Sprintf("%d/%d/%s", normalized.KeyTag(), normalized.Algorithm, normalized.PublicKey)
+	return fmt.Sprintf(
+		"%d/%d/%s",
+		normalized.KeyTag(),
+		normalized.Algorithm,
+		normalized.PublicKey,
+	)
 }
 
 func rootAnchorRecord(key *dns.DNSKEY) string {
@@ -243,7 +327,11 @@ func (m *rootAnchorManager) refresh(ctx context.Context) error {
 		}
 	}
 	m.updateMetrics()
-	slog.Info("authenticated root DNSSEC trust-anchor refresh", "active", m.activeCount())
+	slog.Info(
+		"authenticated root DNSSEC trust-anchor refresh",
+		"active",
+		m.activeCount(),
+	)
 	return nil
 }
 
@@ -285,7 +373,11 @@ func (m *rootAnchorManager) apply(
 			m.anchors = append(m.anchors[:idx], m.anchors[idx+1:]...)
 			changed = true
 			metricRootAnchorTransitions.WithLabelValues("revoked").Inc()
-			slog.Warn("root DNSSEC trust anchor revoked", "key_tag", key.KeyTag())
+			slog.Warn(
+				"root DNSSEC trust anchor revoked",
+				"key_tag",
+				key.KeyTag(),
+			)
 			continue
 		}
 		candidate, present := byID[id]
@@ -294,8 +386,13 @@ func (m *rootAnchorManager) apply(
 				now.Sub(anchor.FirstSeen) >= m.holdDown {
 				anchor.Status = rootAnchorValid
 				changed = true
-				metricRootAnchorTransitions.WithLabelValues(rootAnchorValid).Inc()
-				slog.Info("root DNSSEC trust anchor accepted after hold-down", "key_tag", candidate.KeyTag())
+				metricRootAnchorTransitions.WithLabelValues(rootAnchorValid).
+					Inc()
+				slog.Info(
+					"root DNSSEC trust anchor accepted after hold-down",
+					"key_tag",
+					candidate.KeyTag(),
+				)
 			} else if anchor.Status == rootAnchorPendingRemove {
 				anchor.Status = rootAnchorValid
 				changed = true
@@ -314,7 +411,8 @@ func (m *rootAnchorManager) apply(
 			anchor.Status = rootAnchorPendingRemove
 			anchor.FirstSeen = now
 			changed = true
-			metricRootAnchorTransitions.WithLabelValues(rootAnchorPendingRemove).Inc()
+			metricRootAnchorTransitions.WithLabelValues(rootAnchorPendingRemove).
+				Inc()
 		case rootAnchorPendingRemove:
 			if now.Sub(anchor.FirstSeen) >= m.holdDown {
 				m.anchors = append(m.anchors[:idx], m.anchors[idx+1:]...)
@@ -340,7 +438,11 @@ func (m *rootAnchorManager) apply(
 		})
 		changed = true
 		metricRootAnchorTransitions.WithLabelValues(rootAnchorPendingAdd).Inc()
-		slog.Info("new root DNSSEC trust anchor observed; hold-down started", "key_tag", key.KeyTag())
+		slog.Info(
+			"new root DNSSEC trust anchor observed; hold-down started",
+			"key_tag",
+			key.KeyTag(),
+		)
 	}
 	return changed, nil
 }
@@ -371,7 +473,8 @@ func (m *rootAnchorManager) activeCount() int {
 	defer m.mu.RUnlock()
 	count := 0
 	for _, anchor := range m.anchors {
-		if anchor.Status == rootAnchorValid || anchor.Status == rootAnchorPendingRemove {
+		if anchor.Status == rootAnchorValid ||
+			anchor.Status == rootAnchorPendingRemove {
 			count++
 		}
 	}
@@ -393,7 +496,11 @@ func (m *rootAnchorManager) start() func() {
 				time.Duration(m.config.Dns.QueryTimeoutMs)*time.Millisecond,
 			)
 			if err := m.refresh(refreshCtx); err != nil {
-				slog.Warn("DNSSEC root trust-anchor refresh failed", "error", err)
+				slog.Warn(
+					"DNSSEC root trust-anchor refresh failed",
+					"error",
+					err,
+				)
 			}
 			refreshCancel()
 		}
