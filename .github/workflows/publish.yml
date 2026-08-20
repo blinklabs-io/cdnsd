@@ -79,7 +79,7 @@ jobs:
             --data-binary @${_filename} \
             https://uploads.github.com/repos/${{ github.repository_owner }}/cdnsd/releases/${{ needs.create-draft-release.outputs.RELEASE_ID }}/assets?name=${_filename}
       - name: Attest binary
-        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0 https://github.com/actions/attest/releases/tag/v4.2.0
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2 https://github.com/actions/attest/releases/tag/v4.2.2
         with:
           subject-path: 'cdnsd'
 
@@ -109,12 +109,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0 https://github.com/docker/setup-buildx-action/releases/tag/v4.2.0
       - name: Login to Docker Hub
-        uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4.5.1 https://github.com/docker/login-action/releases/tag/v4.5.1
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0 https://github.com/docker/login-action/releases/tag/v4.6.0
         with:
           username: blinklabs
           password: ${{ secrets.DOCKER_PASSWORD }} # uses token
       - name: Login to GHCR
-        uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4.5.1 https://github.com/docker/login-action/releases/tag/v4.5.1
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0 https://github.com/docker/login-action/releases/tag/v4.6.0
         with:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
@@ -157,12 +157,12 @@ jobs:
           persist-credentials: false
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0 https://github.com/docker/setup-buildx-action/releases/tag/v4.2.0
       - name: Login to Docker Hub
-        uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4.5.1 https://github.com/docker/login-action/releases/tag/v4.5.1
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0 https://github.com/docker/login-action/releases/tag/v4.6.0
         with:
           username: blinklabs
           password: ${{ secrets.DOCKER_PASSWORD }} # uses token
       - name: Login to GHCR
-        uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4.5.1 https://github.com/docker/login-action/releases/tag/v4.5.1
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0 https://github.com/docker/login-action/releases/tag/v4.6.0
         with:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
@@ -200,13 +200,13 @@ jobs:
           echo "dockerhub_digest=$(docker buildx imagetools inspect --format '{{json .Manifest.Digest}}' "${dockerhub_tag}" | jq -r .)" >> "${GITHUB_OUTPUT}"
           echo "ghcr_digest=$(docker buildx imagetools inspect --format '{{json .Manifest.Digest}}' "${ghcr_tag}" | jq -r .)" >> "${GITHUB_OUTPUT}"
       - name: Attest Docker Hub image
-        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0 https://github.com/actions/attest/releases/tag/v4.2.0
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2 https://github.com/actions/attest/releases/tag/v4.2.2
         with:
           subject-name: index.docker.io/blinklabs/cdnsd
           subject-digest: ${{ steps.digest.outputs.dockerhub_digest }}
           push-to-registry: true
       - name: Attest GHCR image
-        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0 https://github.com/actions/attest/releases/tag/v4.2.0
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2 https://github.com/actions/attest/releases/tag/v4.2.2
         with:
           subject-name: ghcr.io/${{ github.repository }}
           subject-digest: ${{ steps.digest.outputs.ghcr_digest }}

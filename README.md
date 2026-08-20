@@ -29,6 +29,37 @@ Resolver for Cardano-based second-level domains on Handshake top-level domains
 
 `cdnsd` supports configuration via YAML config files, and all settings may be overridden with environment variables.
 
+### Production deployment
+
+This repository currently ships only pre-production Cardano profiles. The
+built-in defaults (`ada-preprod` and `auto-preprod`) are for testing and must
+not be used as a production configuration. There are no mainnet profiles in
+this release; configure and independently verify the network, policy, script
+address, and sync intercept before serving any real traffic.
+
+Before exposing the resolver, operators should:
+
+- Set `indexer.verify: true` (the default) and keep it enabled. Disabling it
+  is suitable only for controlled development experiments.
+- Bind DNS to the intended interface explicitly. Set
+  `dns.recursionEnabled: false` unless this instance is protected by network
+  ACLs and is deliberately operated as a recursive resolver.
+- Keep metrics and debug/pprof on loopback or a protected management network.
+  An empty metrics address is treated as loopback by the daemon; an explicit
+  wildcard address exposes it broadly.
+- Put `state.dir` on persistent, private storage and include it in backups.
+  The state contains the indexed data and DNSSEC root-anchor rollover state;
+  do not share it between active instances.
+- Monitor logs, `/healthz`, `/readyz`, and Prometheus metrics. Readiness means
+  the indexer and DNS listeners have started; it does not attest that the
+  configured chain or upstream DNS sources are healthy.
+
+The resolver has not yet implemented every operational property required for
+an internet-facing authoritative or recursive service, including complete
+chain reorganization handling and name expiration handling. Review the
+current issue tracker and test the selected deployment topology before using
+it for production traffic.
+
 ### Top-level Config Options (YAML)
 
 | Option                  | Type         | Environment Variable              | Description |
@@ -70,13 +101,13 @@ logging:
   debug: true
   queryLog: true
 metrics:
-  address: ""
+  address: "127.0.0.1"
   port: 9000
 dns:
   address: "0.0.0.0"
   port: 8053
   tlsPort: 8853
-  recursionEnabled: true
+  recursionEnabled: false
   rootHintsFile: "/etc/cdnsd/named.root"
   dnssec:
     enabled: true
@@ -92,7 +123,7 @@ indexer:
   socketPath: ""
   interceptHash: ""
   interceptSlot: 0
-  verify: false
+  verify: true
   handshakeAddress: ""
 state:
   dir: "/var/lib/cdnsd"
@@ -159,7 +190,27 @@ export DNS_LISTEN_PORT=5353
 cdnsd
 ```
 
+For the container image, mount a persistent volume at `/var/lib/cdnsd`.
+The image sets `STATE_DIR` to that path and runs as the unprivileged
+`nonroot` user. A typical deployment should also publish only the DNS ports
+needed by clients and keep the management listener private:
+
+```sh
+docker run --rm \
+  -v cdnsd-state:/var/lib/cdnsd \
+  -p 8053:8053/udp -p 8053:8053/tcp \
+  ghcr.io/blinklabs-io/cdnsd:TAG
+```
+
 ## Metrics & Observability
 
-- Prometheus: Exposed at `/metrics` (port per config)
-- Debug HTTP/pprof: If debug port is set, accessible for diagnostics
+- Prometheus: Exposed at `/metrics` (port per config; empty address defaults
+  to `127.0.0.1`)
+- Health: `/healthz` reports that the HTTP process is responding;
+  `/readyz` returns `503` until the indexer and DNS listeners have started
+- Debug HTTP/pprof: If the debug port is set, accessible for diagnostics;
+  protect this endpoint because pprof can expose sensitive runtime details
+
+These HTTP endpoints are unauthenticated. Use loopback, firewall rules, or a
+separate authenticated reverse proxy for all management traffic. Do not bind
+metrics or debug to `0.0.0.0` on an untrusted network.

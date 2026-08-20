@@ -17,6 +17,9 @@ import (
 	_ "net/http/pprof" // #nosec G108
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -35,6 +38,72 @@ var cmdlineFlags struct {
 }
 
 const shutdownTimeout = 15 * time.Second
+
+const (
+	httpReadHeaderTimeout = 5 * time.Second
+	httpReadTimeout       = 10 * time.Second
+	httpWriteTimeout      = 10 * time.Second
+	httpIdleTimeout       = 60 * time.Second
+	maxHTTPHeaderBytes    = 1 << 20
+)
+
+type runtimeStatus struct {
+	ready atomic.Bool
+}
+
+func (s *runtimeStatus) healthHandler(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ok\n"))
+}
+
+func (s *runtimeStatus) readinessHandler(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	if !s.ready.Load() {
+		http.Error(w, "not ready\n", http.StatusServiceUnavailable)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ready\n"))
+}
+
+func (s *runtimeStatus) setReady(ready bool) {
+	s.ready.Store(ready)
+}
+
+func observabilityListenAddress(address string) string {
+	if strings.TrimSpace(address) == "" {
+		return "127.0.0.1"
+	}
+	return address
+}
+
+func httpListenAddress(address string, port uint) string {
+	return net.JoinHostPort(
+		observabilityListenAddress(address),
+		strconv.FormatUint(uint64(port), 10),
+	)
+}
+
+func newHTTPServer(address string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              address,
+		Handler:           handler,
+		ReadHeaderTimeout: httpReadHeaderTimeout,
+		ReadTimeout:       httpReadTimeout,
+		WriteTimeout:      httpWriteTimeout,
+		IdleTimeout:       httpIdleTimeout,
+		MaxHeaderBytes:    maxHTTPHeaderBytes,
+	}
+}
+
+func newMetricsMux(status *runtimeStatus) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	mux.HandleFunc("/healthz", status.healthHandler)
+	mux.HandleFunc("/readyz", status.readinessHandler)
+	return mux
+}
 
 func slogPrintf(format string, v ...any) {
 	slog.Info(fmt.Sprintf(format, v...))
@@ -103,10 +172,12 @@ func run() int {
 
 	asyncErrCh := make(chan error, 8)
 	indexerSvc := indexer.GetIndexer()
+	status := &runtimeStatus{}
 	var dnsSrv *dns.Server
 	var debugSrv *http.Server
 	var metricsSrv *http.Server
 	shutdown := func() error {
+		status.setReady(false)
 		shutdownCtx, cancel := context.WithTimeout(
 			context.Background(),
 			shutdownTimeout,
@@ -136,22 +207,12 @@ func run() int {
 
 	// Start debug listener
 	if cfg.Debug.ListenPort > 0 {
-		debugListenAddr := fmt.Sprintf(
-			"%s:%d",
+		debugListenAddr := httpListenAddress(
 			cfg.Debug.ListenAddress,
 			cfg.Debug.ListenPort,
 		)
-		slog.Info(
-			fmt.Sprintf(
-				"starting debug listener on %s:%d",
-				cfg.Debug.ListenAddress,
-				cfg.Debug.ListenPort,
-			),
-		)
-		debugSrv = &http.Server{
-			Addr:              debugListenAddr,
-			ReadHeaderTimeout: 60 * time.Second,
-		}
+		slog.Info("starting debug listener on " + debugListenAddr)
+		debugSrv = newHTTPServer(debugListenAddr, http.DefaultServeMux)
 		if err := startHTTPServer("debug", debugSrv, asyncErrCh); err != nil {
 			slog.Error(err.Error())
 			_ = shutdown()
@@ -164,22 +225,14 @@ func run() int {
 
 	// Start metrics listener
 	if cfg.Metrics.ListenPort > 0 {
-		metricsListenAddr := fmt.Sprintf(
-			"%s:%d",
+		metricsListenAddr := httpListenAddress(
 			cfg.Metrics.ListenAddress,
 			cfg.Metrics.ListenPort,
 		)
 		slog.Info(
 			"starting listener for prometheus metrics connections on " + metricsListenAddr,
 		)
-		metricsMux := http.NewServeMux()
-		metricsMux.Handle("/metrics", promhttp.Handler())
-		metricsSrv = &http.Server{
-			Addr:         metricsListenAddr,
-			WriteTimeout: 10 * time.Second,
-			ReadTimeout:  10 * time.Second,
-			Handler:      metricsMux,
-		}
+		metricsSrv = newHTTPServer(metricsListenAddr, newMetricsMux(status))
 		if err := startHTTPServer("metrics", metricsSrv, asyncErrCh); err != nil {
 			slog.Error(err.Error())
 			_ = shutdown()
@@ -214,6 +267,7 @@ func run() int {
 	if signalReceived() {
 		return shutdownAfterSignal()
 	}
+	status.setReady(true)
 
 	var runtimeErr error
 	select {

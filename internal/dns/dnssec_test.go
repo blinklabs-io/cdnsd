@@ -951,7 +951,7 @@ func TestOnChainDSBecomesTrustAnchor(t *testing.T) {
 	}
 }
 
-func loadIsolatedTestState(t *testing.T) {
+func loadIsolatedTestState(t testing.TB) {
 	t.Helper()
 	cfg := config.GetConfig()
 	oldDirectory := cfg.State.Directory
@@ -974,6 +974,37 @@ func loadIsolatedTestState(t *testing.T) {
 			}
 		}
 	})
+}
+
+func BenchmarkLocalDNSSECProofLookupDoesNotRescanCachedZone(b *testing.B) {
+	for _, unrelatedRecords := range []int{1, 1024} {
+		b.Run(fmt.Sprintf("unrelated-%d", unrelatedRecords), func(b *testing.B) {
+			loadIsolatedTestState(b)
+			zone := fmt.Sprintf("bench-%d.", unrelatedRecords)
+			records := make([]state.DomainRecord, 0, unrelatedRecords)
+			for idx := range unrelatedRecords {
+				records = append(records, state.DomainRecord{
+					Lhs:  fmt.Sprintf("n%d.%s", idx, zone),
+					Type: "NSEC",
+					Rhs:  fmt.Sprintf("z.%s NSEC", zone),
+				})
+			}
+			if err := state.GetState().UpdateDomain(zone, records); err != nil {
+				b.Fatalf("UpdateDomain() error = %v", err)
+			}
+			if _, err := lookupCachedLocalZoneDNSSECRecords(zone, false); err != nil {
+				b.Fatalf("warm cache lookup error = %v", err)
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				if _, err := lookupCachedLocalZoneDNSSECRecords(zone, false); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
 }
 
 func TestLocalAuthenticatedDenialResponses(t *testing.T) {
@@ -1161,6 +1192,53 @@ func TestLocalDNSSECRecordsDoNotMixRoots(t *testing.T) {
 	if len(records) != 1 ||
 		canonicalDNSName(records[0].Header().Name) != zone {
 		t.Fatalf("local DNSSEC records crossed roots: %v", records)
+	}
+}
+
+func TestLocalDNSSECProofCacheInvalidatesAndIsConcurrent(t *testing.T) {
+	loadIsolatedTestState(t)
+	zone := "cache."
+	record := state.DomainRecord{
+		Lhs:  zone,
+		Type: "NSEC",
+		Rhs:  "z.cache. NSEC",
+	}
+	if err := state.GetState().UpdateDomain(zone, []state.DomainRecord{record}); err != nil {
+		t.Fatalf("UpdateDomain() error = %v", err)
+	}
+	records, err := lookupLocalZoneDNSSECRecords(zone, false)
+	if err != nil || len(records) != 1 {
+		t.Fatalf("initial cached lookup = %v, %v; want one record", records, err)
+	}
+
+	const queryCount = 16
+	errCh := make(chan error, queryCount)
+	for range queryCount {
+		go func() {
+			got, lookupErr := lookupLocalZoneDNSSECRecords(zone, false)
+			if lookupErr != nil {
+				errCh <- lookupErr
+				return
+			}
+			if len(got) != 1 {
+				errCh <- fmt.Errorf("concurrent cached lookup returned %d records", len(got))
+				return
+			}
+			errCh <- nil
+		}()
+	}
+	for range queryCount {
+		if err := <-errCh; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := state.GetState().UpdateDomain(zone, nil); err != nil {
+		t.Fatalf("remove UpdateDomain() error = %v", err)
+	}
+	records, err = lookupLocalZoneDNSSECRecords(zone, false)
+	if err != nil || len(records) != 0 {
+		t.Fatalf("lookup after removal = %v, %v; want empty result", records, err)
 	}
 }
 

@@ -7,6 +7,8 @@
 package indexer
 
 import (
+	"bytes"
+	"crypto/sha3"
 	"encoding/base32"
 	"encoding/hex"
 	"errors"
@@ -27,6 +29,117 @@ type handshakeState struct {
 	peerBackoffDelay time.Duration
 	lastBlockHash    [32]byte
 	hasLastBlock     bool
+}
+
+type handshakeOutputValidation struct {
+	covenant handshake.Covenant
+	name     string
+	records  []state.DomainRecord
+}
+
+type handshakeBlockPreflight [][]handshakeOutputValidation
+
+// validateHandshakeStateChanges decodes each covenant and resolves all state
+// dependencies once, in block order. Names created earlier in the block are
+// kept in an in-memory overlay so later outputs can reference them without
+// requiring a persistent write during preflight.
+func validateHandshakeStateChanges(
+	block *handshake.Block,
+) (handshakeBlockPreflight, error) {
+	if block == nil {
+		return nil, errors.New("cannot validate a nil Handshake block")
+	}
+	preflight := make(handshakeBlockPreflight, len(block.Transactions))
+	knownNames := make(map[string]string)
+	rememberName := func(name string) {
+		nameHash := sha3.Sum256([]byte(name))
+		knownNames[string(nameHash[:])] = name
+	}
+	resolveName := func(nameHash []byte) (string, error) {
+		if name, ok := knownNames[string(nameHash)]; ok {
+			return name, nil
+		}
+		return state.GetState().GetHandshakeNameByHash(nameHash)
+	}
+	for txIndex, tx := range block.Transactions {
+		preflight[txIndex] = make(
+			[]handshakeOutputValidation,
+			len(tx.Outputs),
+		)
+		for outputIndex, output := range tx.Outputs {
+			cov, err := output.Covenant.CheckedCovenant()
+			if err != nil {
+				return nil, fmt.Errorf(
+					"transaction %d output %d covenant: %w",
+					txIndex,
+					outputIndex,
+					err,
+				)
+			}
+			validation := handshakeOutputValidation{covenant: cov}
+			switch c := cov.(type) {
+			case *handshake.OpenCovenant:
+				rememberName(c.RawName)
+			case *handshake.ClaimCovenant:
+				rememberName(c.RawName)
+			case *handshake.RegisterCovenant:
+				name, err := resolveName(c.NameHash)
+				if err != nil {
+					return nil, fmt.Errorf("resolve register name: %w", err)
+				}
+				records, err := handshakeResourceDataToDomainRecords(
+					name,
+					c.ResourceData,
+				)
+				if err != nil {
+					return nil, fmt.Errorf("validate register records: %w", err)
+				}
+				validation.name = name
+				validation.records = records
+			case *handshake.UpdateCovenant:
+				name, err := resolveName(c.NameHash)
+				if err != nil {
+					return nil, fmt.Errorf("resolve update name: %w", err)
+				}
+				records, err := handshakeResourceDataToDomainRecords(
+					name,
+					c.ResourceData,
+				)
+				if err != nil {
+					return nil, fmt.Errorf("validate update records: %w", err)
+				}
+				validation.name = name
+				validation.records = records
+			case *handshake.RenewCovenant:
+				name, err := resolveName(c.NameHash)
+				if err != nil {
+					return nil, fmt.Errorf("resolve renewal name: %w", err)
+				}
+				validation.name = name
+			case *handshake.TransferCovenant:
+				name, err := resolveName(c.NameHash)
+				if err != nil {
+					return nil, fmt.Errorf("resolve transfer name: %w", err)
+				}
+				validation.name = name
+			case *handshake.FinalizeCovenant:
+				nameHash := sha3.Sum256([]byte(c.RawName))
+				if !bytes.Equal(c.NameHash, nameHash[:]) {
+					return nil, errors.New("finalize name hash does not match raw name")
+				}
+				rememberName(c.RawName)
+				validation.name = c.RawName
+			case *handshake.RevokeCovenant:
+				name, err := resolveName(c.NameHash)
+				if err != nil {
+					return nil, fmt.Errorf("resolve revoke name: %w", err)
+				}
+				validation.name = name
+			}
+			preflight[txIndex][outputIndex] = validation
+		}
+	}
+	return preflight, nil
 }
 
 func (i *Indexer) startHandshake(stopCh <-chan struct{}) error {
@@ -200,6 +313,9 @@ func (i *Indexer) handshakeReconnectPeer(stopCh <-chan struct{}) {
 }
 
 func (i *Indexer) handshakeHandleSync(block *handshake.Block) error {
+	if block == nil {
+		return errors.New("received nil Handshake block")
+	}
 	slog.Debug(
 		"synced Handshake block",
 		"hash", fmt.Sprintf("%x", block.Hash()),
@@ -225,11 +341,19 @@ func (i *Indexer) handshakeHandleSync(block *handshake.Block) error {
 			err,
 		)
 	}
+	// Parse every covenant and resolve every state dependency before applying
+	// any output. The preflight also caches these results and tracks names
+	// created earlier in this block without mutating persistent state.
+	preflight, err := validateHandshakeStateChanges(block)
+	if err != nil {
+		return fmt.Errorf("handshake block state preflight failed: %w", err)
+	}
 	// Process transactions
-	for _, tx := range block.Transactions {
+	for txIndex, tx := range block.Transactions {
 		// Process outputs
-		for _, output := range tx.Outputs {
-			cov := output.Covenant.Covenant()
+		for outputIndex := range tx.Outputs {
+			validated := preflight[txIndex][outputIndex]
+			cov := validated.covenant
 			switch c := cov.(type) {
 			case *handshake.OpenCovenant:
 				if err := state.GetState().AddHandshakeName(c.RawName); err != nil {
@@ -240,49 +364,25 @@ func (i *Indexer) handshakeHandleSync(block *handshake.Block) error {
 					return err
 				}
 			case *handshake.RegisterCovenant:
-				name, err := state.GetState().GetHandshakeNameByHash(c.NameHash)
-				if err != nil {
-					return err
-				}
+				name := validated.name
 				slog.Debug("Handshake domain registration", "name", name, "resdata", c.ResourceData)
-				records, err := handshakeResourceDataToDomainRecords(name, c.ResourceData)
-				if err != nil {
-					return err
-				}
-				if err := state.GetState().UpdateHandshakeDomain(name, records); err != nil {
+				if err := state.GetState().UpdateHandshakeDomain(name, validated.records); err != nil {
 					return err
 				}
 			case *handshake.UpdateCovenant:
-				name, err := state.GetState().GetHandshakeNameByHash(c.NameHash)
-				if err != nil {
-					return err
-				}
+				name := validated.name
 				slog.Debug("Handshake domain update", "name", name, "resdata", c.ResourceData)
-				records, err := handshakeResourceDataToDomainRecords(name, c.ResourceData)
-				if err != nil {
-					return err
-				}
-				if err := state.GetState().UpdateHandshakeDomain(name, records); err != nil {
+				if err := state.GetState().UpdateHandshakeDomain(name, validated.records); err != nil {
 					return err
 				}
 			case *handshake.RenewCovenant:
-				name, err := state.GetState().GetHandshakeNameByHash(
-					c.NameHash,
-				)
-				if err != nil {
-					return err
-				}
+				name := validated.name
 				slog.Debug(
 					"Handshake domain renewal",
 					"name", name,
 				)
 			case *handshake.TransferCovenant:
-				name, err := state.GetState().GetHandshakeNameByHash(
-					c.NameHash,
-				)
-				if err != nil {
-					return err
-				}
+				name := validated.name
 				slog.Debug(
 					"Handshake domain transfer initiated",
 					"name", name,
@@ -293,23 +393,13 @@ func (i *Indexer) handshakeHandleSync(block *handshake.Block) error {
 				); err != nil {
 					return err
 				}
-				name, err := state.GetState().GetHandshakeNameByHash(
-					c.NameHash,
-				)
-				if err != nil {
-					return err
-				}
+				name := validated.name
 				slog.Debug(
 					"Handshake domain transfer finalized",
 					"name", name,
 				)
 			case *handshake.RevokeCovenant:
-				name, err := state.GetState().GetHandshakeNameByHash(
-					c.NameHash,
-				)
-				if err != nil {
-					return err
-				}
+				name := validated.name
 				slog.Info(
 					"Handshake domain revoked, clearing records",
 					"name", name,

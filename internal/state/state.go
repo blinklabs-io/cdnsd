@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/blinklabs-io/cdnsd/internal/config"
@@ -36,6 +37,8 @@ const (
 	handshakeDomainKeyPrefix   = "hs_d_"
 	handshakeRecordKeyPrefix   = "hs_r_"
 	dnssecRootAnchorStateKey   = "dnssec_root_anchor_state"
+	cardanoDNSSECRevisionKey   = "dnssec_revision_cardano"
+	handshakeDNSSECRevisionKey = "dnssec_revision_handshake"
 )
 
 // ErrStateNotLoaded is returned when an operation needs a loaded state database.
@@ -45,11 +48,14 @@ var ErrStateNotLoaded = errors.New("state database is not loaded")
 var ErrStateAlreadyLoaded = errors.New("state database is already loaded")
 
 type State struct {
-	mu      sync.RWMutex
-	db      *badger.DB
-	gcTimer *time.Ticker
-	gcStop  chan struct{}
-	gcDone  chan struct{}
+	mu sync.RWMutex
+	db *badger.DB
+	// instanceID distinguishes a database reload that starts with the same
+	// persisted revision, which is important to users of the state cache.
+	instanceID uint64
+	gcTimer    *time.Ticker
+	gcStop     chan struct{}
+	gcDone     chan struct{}
 }
 
 type DomainRecord struct {
@@ -66,6 +72,8 @@ type DiscoveredAddress struct {
 }
 
 var globalState = &State{}
+
+var stateInstanceCounter atomic.Uint64
 
 func (s *State) Load() error {
 	s.mu.Lock()
@@ -93,6 +101,7 @@ func (s *State) Load() error {
 	gcStop := make(chan struct{})
 	gcDone := make(chan struct{})
 	s.db = db
+	s.instanceID = stateInstanceCounter.Add(1)
 	s.gcTimer = gcTimer
 	s.gcStop = gcStop
 	s.gcDone = gcDone
@@ -402,6 +411,7 @@ func (s *State) UpdateDomain(
 		records,
 		cardanoDomainKeyPrefix,
 		cardanoRecordKeyPrefix,
+		false,
 	)
 }
 
@@ -410,6 +420,7 @@ func (s *State) updateDomain(
 	records []DomainRecord,
 	domainKeyPrefix string,
 	recordKeyPrefix string,
+	fromHandshake bool,
 ) error {
 	err := s.update(func(txn *badger.Txn) error {
 		// Add new records
@@ -476,9 +487,76 @@ func (s *State) updateDomain(
 		if err := txn.Set(domainRecordsKey, []byte(recordKeysJoin)); err != nil {
 			return err
 		}
+		revisionKey := cardanoDNSSECRevisionKey
+		if fromHandshake {
+			revisionKey = handshakeDNSSECRevisionKey
+		}
+		if err := bumpRevision(txn, revisionKey); err != nil {
+			return err
+		}
 		return nil
 	})
 	return err
+}
+
+func bumpRevision(txn *badger.Txn, key string) error {
+	var revision uint64
+	item, err := txn.Get([]byte(key))
+	if err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
+		return err
+	}
+	if err == nil {
+		value, valueErr := item.ValueCopy(nil)
+		if valueErr != nil {
+			return valueErr
+		}
+		revision, err = strconv.ParseUint(string(value), 10, 64)
+		if err != nil {
+			return fmt.Errorf("parse DNSSEC state revision: %w", err)
+		}
+	}
+	if revision == ^uint64(0) {
+		return errors.New("DNSSEC state revision exhausted")
+	}
+	return txn.Set([]byte(key), []byte(strconv.FormatUint(revision+1, 10)))
+}
+
+// DNSSECRevision returns a process-local state identity and the persisted
+// revision for one record namespace. The identity changes on every Load so a
+// cache cannot reuse records from a closed and recreated database.
+func (s *State) DNSSECRevision(fromHandshake bool) (uint64, uint64, error) {
+	if s == nil {
+		return 0, 0, ErrStateNotLoaded
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return 0, 0, ErrStateNotLoaded
+	}
+	key := cardanoDNSSECRevisionKey
+	if fromHandshake {
+		key = handshakeDNSSECRevisionKey
+	}
+	var revision uint64
+	err := s.db.View(func(txn *badger.Txn) error {
+		item, err := txn.Get([]byte(key))
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		value, err := item.ValueCopy(nil)
+		if err != nil {
+			return err
+		}
+		revision, err = strconv.ParseUint(string(value), 10, 64)
+		if err != nil {
+			return fmt.Errorf("parse DNSSEC state revision: %w", err)
+		}
+		return nil
+	})
+	return s.instanceID, revision, err
 }
 
 func (s *State) LookupRecords(
@@ -702,6 +780,7 @@ func (s *State) UpdateHandshakeDomain(
 		records,
 		handshakeDomainKeyPrefix,
 		handshakeRecordKeyPrefix,
+		true,
 	)
 }
 
