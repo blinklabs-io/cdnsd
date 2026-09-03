@@ -7,6 +7,7 @@
 package dns
 
 import (
+	"context"
 	"crypto"
 	"errors"
 	"fmt"
@@ -236,11 +237,90 @@ func TestValidatingQuerySetsAuthenticatedData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("queryMultipleNameserversWithPort() error = %v", err)
 	}
+	if resp == nil {
+		t.Fatal("queryMultipleNameserversWithPort() returned nil response")
+	}
 	if !resp.AuthenticatedData {
 		t.Fatal("validated response did not have the AD bit")
 	}
 	if !sawDO.Load() {
 		t.Fatal("authoritative server did not receive the DO bit")
+	}
+}
+
+func TestPrepareDNSSECValidationBoundsAndReusesDNSKEYFetches(t *testing.T) {
+	zone := "."
+	key, signer := newTestDNSSECKey(t, zone)
+	validation := &dnssecValidation{
+		zone:    zone,
+		anchors: []dns.RR{testDS(t, key)},
+	}
+	var fetches atomic.Int32
+	resolver := &Resolver{
+		dnssecEnabled: true,
+		exchangeFn: func(
+			_ context.Context,
+			query *dns.Msg,
+			_ string,
+			_ time.Duration,
+		) (*dns.Msg, error) {
+			fetches.Add(1)
+			response := new(dns.Msg)
+			response.SetReply(query)
+			keyCopy, ok := dns.Copy(key).(*dns.DNSKEY)
+			if !ok {
+				return nil, errors.New("failed to copy test DNSKEY")
+			}
+			rrset := []dns.RR{keyCopy}
+			response.Answer = append(response.Answer, rrset...)
+			response.Answer = append(
+				response.Answer,
+				signTestRRset(t, zone, key, signer, rrset),
+			)
+			return response, nil
+		},
+	}
+	addresses := []string{
+		"192.0.2.1:53",
+		"192.0.2.2:53",
+		"192.0.2.3:53",
+		"192.0.2.4:53",
+	}
+	querySlots := make(chan struct{}, maxConcurrentNameserverQueries)
+
+	prepared, err := resolver.prepareDNSSECValidation(
+		context.Background(),
+		validation,
+		addresses,
+		time.Second,
+		querySlots,
+	)
+	if err != nil {
+		t.Fatalf("prepareDNSSECValidation() error = %v", err)
+	}
+	if len(prepared.keys) == 0 {
+		t.Fatal("prepareDNSSECValidation() did not initialize DNSSEC keys")
+	}
+	if got := fetches.Load(); got == 0 || got > maxConcurrentNameserverQueries {
+		t.Fatalf("DNSKEY fetch count = %d, want 1..%d", got, maxConcurrentNameserverQueries)
+	}
+
+	beforeReuse := fetches.Load()
+	reused, err := resolver.prepareDNSSECValidation(
+		context.Background(),
+		prepared,
+		addresses,
+		time.Second,
+		querySlots,
+	)
+	if err != nil {
+		t.Fatalf("reused prepareDNSSECValidation() error = %v", err)
+	}
+	if reused != prepared {
+		t.Fatal("initialized DNSSEC validation state was not reused")
+	}
+	if got := fetches.Load(); got != beforeReuse {
+		t.Fatalf("reused validation performed %d extra DNSKEY fetches", got-beforeReuse)
 	}
 }
 
