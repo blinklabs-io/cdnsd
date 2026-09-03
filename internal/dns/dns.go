@@ -1735,16 +1735,16 @@ func (r *Resolver) queryNameserverAddress(
 	baseDelay time.Duration,
 	querySlots chan struct{},
 ) (*dns.Msg, error) {
-	release, err := acquireNameserverQuerySlot(ctx, querySlots)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-	exchangeTimeout, err := exchangeTimeout(ctx, timeout)
-	if err != nil {
-		return nil, err
-	}
 	queryFn := func() (*dns.Msg, error) {
+		release, err := acquireNameserverQuerySlot(ctx, querySlots)
+		if err != nil {
+			return nil, err
+		}
+		defer release()
+		exchangeTimeout, err := exchangeTimeout(ctx, timeout)
+		if err != nil {
+			return nil, err
+		}
 		outbound := msg
 		if r.dnssecEnabled || wantsDNSSEC(msg) {
 			outbound = dnssecQuery(msg)
