@@ -5,7 +5,7 @@ go 1.25.12
 require (
 	github.com/blinklabs-io/adder v0.43.1
 	github.com/blinklabs-io/cardano-models v0.7.2
-	github.com/blinklabs-io/gouroboros v0.202.2
+	github.com/blinklabs-io/gouroboros v0.202.8
 	github.com/dgraph-io/badger/v4 v4.9.6
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/miekg/dns v1.1.73
@@ -23,7 +23,7 @@ require (
 	github.com/aws/aws-sdk-go v1.55.8 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bits-and-blooms/bitset v1.24.6 // indirect
-	github.com/blinklabs-io/plutigo v0.4.0 // indirect
+	github.com/blinklabs-io/plutigo v0.5.0 // indirect
 	github.com/btcsuite/btcd/btcec/v2 v2.5.0 // indirect
 	github.com/btcsuite/btcd/btcutil v1.2.0 // indirect
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.2.0 // indirect
