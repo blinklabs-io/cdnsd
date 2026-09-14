@@ -1675,6 +1675,59 @@ func TestQueryMultipleNameserversNoAddresses(t *testing.T) {
 	}
 }
 
+func TestQueryMultipleNameserversTriesFreshAddressesBeforeRetry(t *testing.T) {
+	var mu sync.Mutex
+	var attempted []string
+	resolver := &Resolver{
+		exchangeFn: func(
+			_ context.Context,
+			_ *dns.Msg,
+			address string,
+			_ time.Duration,
+		) (*dns.Msg, error) {
+			mu.Lock()
+			attempted = append(attempted, address)
+			mu.Unlock()
+			response := new(dns.Msg)
+			response.Rcode = dns.RcodeServerFailure
+			return response, nil
+		},
+	}
+	cfg := config.GetConfig()
+	origRetry := cfg.Dns.RetryCount
+	origDelay := cfg.Dns.RetryDelayMs
+	cfg.Dns.RetryCount = 2
+	cfg.Dns.RetryDelayMs = 0
+	defer func() {
+		cfg.Dns.RetryCount = origRetry
+		cfg.Dns.RetryDelayMs = origDelay
+	}()
+
+	msg := new(dns.Msg)
+	msg.SetQuestion("example.com.", dns.TypeA)
+	_, err := resolver.queryNameserverAddresses(
+		msg,
+		[]string{"192.0.2.1:53", "192.0.2.2:53", "192.0.2.3:53", "192.0.2.4:53"},
+		false,
+		newResolutionContext(),
+	)
+	if err == nil {
+		t.Fatal("expected all nameservers to fail")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(attempted) < 4 {
+		t.Fatalf("attempted %d addresses, want at least 4", len(attempted))
+	}
+	firstRound := make(map[string]struct{}, 4)
+	for _, address := range attempted[:4] {
+		firstRound[address] = struct{}{}
+	}
+	if len(firstRound) != 4 {
+		t.Errorf("retries preceded fresh addresses: %v", attempted[:4])
+	}
+}
+
 func TestQueryTimeoutRespected(t *testing.T) {
 	cfg := config.GetConfig()
 	origTimeout := cfg.Dns.QueryTimeoutMs

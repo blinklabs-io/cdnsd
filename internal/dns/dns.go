@@ -98,7 +98,6 @@ type resolutionContext struct {
 	querySlots chan struct{}
 }
 
-//nolint:unused // Retained as a context-free compatibility helper for tests.
 func newResolutionContext() *resolutionContext {
 	return newResolutionContextWithContext(context.Background())
 }
@@ -163,6 +162,7 @@ func (r *Resolver) recursionAllowed(w dns.ResponseWriter) bool {
 	if err != nil {
 		host = remote.String()
 	}
+	host, _, _ = strings.Cut(host, "%")
 	ip := net.ParseIP(host)
 	if ip == nil {
 		return false
@@ -1407,7 +1407,6 @@ func queryWithRetryContext(
 	if baseDelay > 10*time.Second {
 		baseDelay = 10 * time.Second
 	}
-	const maxRetryBackoff = 30 * time.Second
 	var lastErr error
 	for attempt := range maxRetries {
 		if err := ctx.Err(); err != nil {
@@ -1421,10 +1420,7 @@ func queryWithRetryContext(
 		// Don't sleep after the last attempt
 		if attempt < maxRetries-1 {
 			// Exponential backoff: baseDelay * 2^attempt
-			delay := baseDelay * time.Duration(1<<attempt)
-			if delay > maxRetryBackoff || delay < 0 {
-				delay = maxRetryBackoff
-			}
+			delay := retryDelay(baseDelay, attempt)
 			timer := time.NewTimer(delay)
 			select {
 			case <-ctx.Done():
@@ -1526,6 +1522,11 @@ type nameserverQueryResult struct {
 	err      error
 }
 
+type nameserverQueryJob struct {
+	address string
+	attempt int
+}
+
 func (r *Resolver) queryNameserverAddresses(
 	msg *dns.Msg,
 	addresses []string,
@@ -1577,10 +1578,12 @@ func (r *Resolver) queryNameserverAddresses(
 
 	runCtx, cancel := context.WithCancel(queryCtx)
 	defer cancel()
-	jobs := make(chan string, len(addresses))
+	jobs := make(chan nameserverQueryJob, len(addresses)*retryCount)
 	results := make(chan nameserverQueryResult)
-	for _, address := range addresses {
-		jobs <- address
+	for attempt := range retryCount {
+		for _, address := range addresses {
+			jobs <- nameserverQueryJob{address: address, attempt: attempt}
+		}
 	}
 	close(jobs)
 	workerCount := min(maxConcurrentNameserverQueries, len(addresses))
@@ -1589,18 +1592,32 @@ func (r *Resolver) queryNameserverAddresses(
 	for range workerCount {
 		go func() {
 			defer workers.Done()
-			for address := range jobs {
+			for job := range jobs {
+				if job.attempt > 0 {
+					timer := time.NewTimer(retryDelay(baseDelay, job.attempt-1))
+					select {
+					case <-runCtx.Done():
+						if !timer.Stop() {
+							select {
+							case <-timer.C:
+							default:
+							}
+						}
+						return
+					case <-timer.C:
+					}
+				}
 				response, err := r.queryNameserverAddress(
 					runCtx,
 					msg,
-					address,
+					job.address,
 					timeout,
-					retryCount,
-					baseDelay,
+					1,
+					0,
 					ctx.querySlots,
 				)
 				result := nameserverQueryResult{
-					address:  address,
+					address:  job.address,
 					response: response,
 					err:      err,
 				}
@@ -1724,6 +1741,18 @@ func interleaveNameserverAddresses(addresses []string) []string {
 		}
 	}
 	return append(ret, other...)
+}
+
+func retryDelay(baseDelay time.Duration, attempt int) time.Duration {
+	const maxRetryBackoff = 30 * time.Second
+	if attempt < 0 {
+		return 0
+	}
+	delay := baseDelay * time.Duration(1<<attempt)
+	if delay > maxRetryBackoff || delay < 0 {
+		return maxRetryBackoff
+	}
+	return delay
 }
 
 func (r *Resolver) queryNameserverAddress(
