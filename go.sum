@@ -15,10 +15,10 @@ github.com/blinklabs-io/adder v0.43.1 h1:KX47D17LHPWCd8wslINlnPhU4E//osrBqvjm6c5
 github.com/blinklabs-io/adder v0.43.1/go.mod h1:kso2baKfO6ciqAT+D6syT+McCk8XrbdjFzjnkwxEtTw=
 github.com/blinklabs-io/cardano-models v0.7.2 h1:5Cg/IpY2Bg/l3grBhfdxtgBXAUVJxBqGLDjhIinN61o=
 github.com/blinklabs-io/cardano-models v0.7.2/go.mod h1:/I+h+cLcruzj9LlWcYSs2k8+ThmvvEGlr9SHRnLzWpE=
-github.com/blinklabs-io/gouroboros v0.202.8 h1:dRw7Dpqd2C9d2WvPl8ePgTuhI3mzhu6ZpDy9fytS7bY=
-github.com/blinklabs-io/gouroboros v0.202.8/go.mod h1:W7P6EkHff/4rbEPdtJVcjxvlbDFfbXWTUGoZqoioh4g=
-github.com/blinklabs-io/ouroboros-mock v0.17.0 h1:rDvBsfz0EEo5UEC/DmskQcTL7JgbABQsuttBbPxVIrk=
-github.com/blinklabs-io/ouroboros-mock v0.17.0/go.mod h1:b62AMGYgh3oFZAi2v9gCEbqy0h+pz8SnY8KyL6tADoM=
+github.com/blinklabs-io/gouroboros v0.204.1 h1:6Y4UFfZLeLJugLG4Ps186y5eeD5ne1Zc4vIbmoxCcJA=
+github.com/blinklabs-io/gouroboros v0.204.1/go.mod h1:QUrXbiy0I3EIYj2T7w+P3RUSbp3GwW7Yh5bhfaA286o=
+github.com/blinklabs-io/ouroboros-mock v0.19.0 h1:f4ej1znSUxCNWfPW6asOd/+mjxBwtMzYAw8nmHHuvtw=
+github.com/blinklabs-io/ouroboros-mock v0.19.0/go.mod h1:CrsKaqRA5cBXYEoMZR+erL2pEp/rbdkvnzNv1wWEeA4=
 github.com/blinklabs-io/plutigo v0.5.0 h1:qDb6ADY5f0LWfQBdr3tZTYGqJGgFdmDQI/iyjSz8CJs=
 github.com/blinklabs-io/plutigo v0.5.0/go.mod h1:ceskOZD5ZkkxhctkfvzRe3XEYdOzFYoxp11RqiG6oeU=
 github.com/btcsuite/btcd v0.20.1-beta/go.mod h1:wVuoA8VJLEcwgqHBwHmzLRazpKxTv13Px/pDuV7OomQ=
