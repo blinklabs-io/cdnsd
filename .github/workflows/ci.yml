@@ -1,0 +1,38 @@
+# Generated automatically by org-governance-bot. Do not edit manually.
+name: "ci"
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - v*
+      - v*.*.*
+
+jobs:
+  go-test:
+    uses: blinklabs-io/actions/.github/workflows/reuseable-go-test.yml@main
+    with:
+      nilaway-include-pkgs: github.com/blinklabs-io/cdnsd
+      run-golangci-lint: true
+      run-nilaway: true
+      run-race-test: true
+  publish:
+    needs: [go-test]
+    if: github.event_name == 'push'
+    uses: blinklabs-io/actions/.github/workflows/reuseable-publish.yml@main
+    permissions:
+      actions: write
+      attestations: write
+      checks: write
+      contents: write
+      id-token: write
+      packages: write
+      statuses: write
+    secrets:
+      docker-password: ${{ secrets.DOCKER_PASSWORD }}
+    with:
+      binary-name: cdnsd
+      description: DNS resolver for Handshake SLDs on Cardano
+      docker-image: blinklabs/cdnsd
