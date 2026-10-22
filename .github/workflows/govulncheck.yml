@@ -14,3 +14,5 @@ on:
 jobs:
   orchestrate:
     uses: blinklabs-io/actions/.github/workflows/reuseable-govulncheck.yml@main
+    with:
+      go-version: 1.26.10
