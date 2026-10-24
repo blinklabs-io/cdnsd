@@ -36,4 +36,3 @@ jobs:
       binary-name: cdnsd
       description: DNS resolver for Handshake SLDs on Cardano
       docker-image: blinklabs/cdnsd
-      go-version: 1.26.10
