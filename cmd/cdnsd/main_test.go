@@ -92,5 +92,4 @@ func TestRuntimeStatusHandlers(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("health status = %d, want %d", response.Code, http.StatusOK)
 	}
-
 }
