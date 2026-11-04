@@ -15,7 +15,11 @@ func TestDNSRecursionDefaultsAreLocalOnly(t *testing.T) {
 		)
 	}
 	if !slices.Equal(DefaultDNSRecursionAllowlist(), want) {
-		t.Fatalf("DefaultDNSRecursionAllowlist() = %v, want %v", DefaultDNSRecursionAllowlist(), want)
+		t.Fatalf(
+			"DefaultDNSRecursionAllowlist() = %v, want %v",
+			DefaultDNSRecursionAllowlist(),
+			want,
+		)
 	}
 }
 

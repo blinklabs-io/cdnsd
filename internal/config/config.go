@@ -43,27 +43,27 @@ type LoggingConfig struct {
 }
 
 type DnsConfig struct {
-	ListenAddress      string       `yaml:"address"          envconfig:"DNS_LISTEN_ADDRESS"`
-	ListenPort         uint         `yaml:"port"             envconfig:"DNS_LISTEN_PORT"`
-	ListenTlsPort      uint         `yaml:"tlsPort"          envconfig:"DNS_LISTEN_TLS_PORT"`
-	RecursionEnabled   bool         `yaml:"recursionEnabled" envconfig:"DNS_RECURSION"`
+	ListenAddress      string       `yaml:"address"            envconfig:"DNS_LISTEN_ADDRESS"`
+	ListenPort         uint         `yaml:"port"               envconfig:"DNS_LISTEN_PORT"`
+	ListenTlsPort      uint         `yaml:"tlsPort"            envconfig:"DNS_LISTEN_TLS_PORT"`
+	RecursionEnabled   bool         `yaml:"recursionEnabled"   envconfig:"DNS_RECURSION"`
 	RecursionAllowlist []string     `yaml:"recursionAllowlist" envconfig:"DNS_RECURSION_ALLOWLIST"`
-	RootHints          string       `yaml:"rootHints"        envconfig:"DNS_ROOT_HINTS"`
-	RootHintsFile      string       `yaml:"rootHintsFile"    envconfig:"DNS_ROOT_HINTS_FILE"`
-	RetryCount         int          `yaml:"retryCount"       envconfig:"DNS_RETRY_COUNT"`
-	RetryDelayMs       int          `yaml:"retryDelayMs"     envconfig:"DNS_RETRY_DELAY_MS"`
-	QueryTimeoutMs     int          `yaml:"queryTimeoutMs"   envconfig:"DNS_QUERY_TIMEOUT_MS"`
+	RootHints          string       `yaml:"rootHints"          envconfig:"DNS_ROOT_HINTS"`
+	RootHintsFile      string       `yaml:"rootHintsFile"      envconfig:"DNS_ROOT_HINTS_FILE"`
+	RetryCount         int          `yaml:"retryCount"         envconfig:"DNS_RETRY_COUNT"`
+	RetryDelayMs       int          `yaml:"retryDelayMs"       envconfig:"DNS_RETRY_DELAY_MS"`
+	QueryTimeoutMs     int          `yaml:"queryTimeoutMs"     envconfig:"DNS_QUERY_TIMEOUT_MS"`
 	RecursionTimeoutMs int          `yaml:"recursionTimeoutMs" envconfig:"DNS_RECURSION_TIMEOUT_MS"`
 	DNSSEC             DNSSECConfig `yaml:"dnssec"`
 	SOA                SOAConfig    `yaml:"soa"`
 }
 
 type DNSSECConfig struct {
-	Enabled                   bool          `yaml:"enabled"                     envconfig:"DNSSEC_ENABLED"`
-	TrustAnchors              string        `yaml:"trustAnchors"                envconfig:"DNSSEC_TRUST_ANCHORS"`
-	TrustAnchorsFile          string        `yaml:"trustAnchorsFile"            envconfig:"DNSSEC_TRUST_ANCHORS_FILE"`
-	RootAnchorRefreshInterval time.Duration `yaml:"rootAnchorRefreshInterval"   envconfig:"DNSSEC_ROOT_ANCHOR_REFRESH_INTERVAL"`
-	RootAnchorHoldDown        time.Duration `yaml:"rootAnchorHoldDown"          envconfig:"DNSSEC_ROOT_ANCHOR_HOLD_DOWN"`
+	Enabled                   bool          `yaml:"enabled"                   envconfig:"DNSSEC_ENABLED"`
+	TrustAnchors              string        `yaml:"trustAnchors"              envconfig:"DNSSEC_TRUST_ANCHORS"`
+	TrustAnchorsFile          string        `yaml:"trustAnchorsFile"          envconfig:"DNSSEC_TRUST_ANCHORS_FILE"`
+	RootAnchorRefreshInterval time.Duration `yaml:"rootAnchorRefreshInterval" envconfig:"DNSSEC_ROOT_ANCHOR_REFRESH_INTERVAL"`
+	RootAnchorHoldDown        time.Duration `yaml:"rootAnchorHoldDown"        envconfig:"DNSSEC_ROOT_ANCHOR_HOLD_DOWN"`
 }
 
 type DebugConfig struct {
@@ -261,7 +261,9 @@ func Load(configFile string) (*Config, error) {
 		globalConfig.Dns.RecursionTimeoutMs = maximumDNSRecursionTimeoutMs
 	}
 	if len(globalConfig.Dns.RecursionAllowlist) == 0 {
-		globalConfig.Dns.RecursionAllowlist = slices.Clone(defaultRecursionAllowlist)
+		globalConfig.Dns.RecursionAllowlist = slices.Clone(
+			defaultRecursionAllowlist,
+		)
 	}
 	for i, network := range globalConfig.Dns.RecursionAllowlist {
 		network = strings.TrimSpace(network)
@@ -270,7 +272,11 @@ func Load(configFile string) (*Config, error) {
 			continue
 		}
 		if _, _, err := net.ParseCIDR(network); err != nil {
-			return nil, fmt.Errorf("invalid DNS recursion allowlist entry %q: %w", network, err)
+			return nil, fmt.Errorf(
+				"invalid DNS recursion allowlist entry %q: %w",
+				network,
+				err,
+			)
 		}
 	}
 	// Load root hints

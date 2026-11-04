@@ -66,10 +66,15 @@ func TestValidateHeaderChainUsesExplicitPowLimit(t *testing.T) {
 		[][32]byte{{}},
 		network,
 	)
-	if err != nil && strings.Contains(err.Error(), "invalid network PoW limit") {
-		t.Fatalf("explicit PowLimit was ignored in favour of zero PowLimitBits: %v", err)
+	if err != nil &&
+		strings.Contains(err.Error(), "invalid network PoW limit") {
+		t.Fatalf(
+			"explicit PowLimit was ignored in favour of zero PowLimitBits: %v",
+			err,
+		)
 	}
-	if err != nil && strings.Contains(err.Error(), "exceeds network PoW limit") {
+	if err != nil &&
+		strings.Contains(err.Error(), "exceeds network PoW limit") {
 		t.Fatalf("target at the configured limit was rejected: %v", err)
 	}
 
@@ -79,8 +84,12 @@ func TestValidateHeaderChainUsesExplicitPowLimit(t *testing.T) {
 		[][32]byte{{}},
 		network,
 	)
-	if err == nil || !strings.Contains(err.Error(), "exceeds network PoW limit") {
-		t.Fatalf("target above the configured PowLimit: want a limit error, got %v", err)
+	if err == nil ||
+		!strings.Contains(err.Error(), "exceeds network PoW limit") {
+		t.Fatalf(
+			"target above the configured PowLimit: want a limit error, got %v",
+			err,
+		)
 	}
 }
 
@@ -93,8 +102,12 @@ func TestValidateHeaderChainRejectsUnusableNetworkPowLimit(t *testing.T) {
 		[][32]byte{{}},
 		Network{Name: "no-powlimit"},
 	)
-	if err == nil || !strings.Contains(err.Error(), "invalid network PoW limit") {
-		t.Fatalf("network with no usable PoW limit: want an invalid-limit error, got %v", err)
+	if err == nil ||
+		!strings.Contains(err.Error(), "invalid network PoW limit") {
+		t.Fatalf(
+			"network with no usable PoW limit: want an invalid-limit error, got %v",
+			err,
+		)
 	}
 }
 
@@ -116,8 +129,13 @@ func TestValidateHeaderChainRejectsInvalidExplicitPowLimit(t *testing.T) {
 				[][32]byte{{}},
 				Network{Name: "bad-powlimit", PowLimit: limit},
 			)
-			if err == nil || !strings.Contains(err.Error(), "invalid network PoW limit") {
-				t.Fatalf("PowLimit %s: want an invalid-limit error, got %v", limit, err)
+			if err == nil ||
+				!strings.Contains(err.Error(), "invalid network PoW limit") {
+				t.Fatalf(
+					"PowLimit %s: want an invalid-limit error, got %v",
+					limit,
+					err,
+				)
 			}
 		})
 	}

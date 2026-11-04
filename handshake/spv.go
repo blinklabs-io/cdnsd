@@ -46,7 +46,10 @@ func (n *ProofNode) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	if len(tmpData) < 2 {
-		return fmt.Errorf("invalid proof node data: expected 2 elements, got %d", len(tmpData))
+		return fmt.Errorf(
+			"invalid proof node data: expected 2 elements, got %d",
+			len(tmpData),
+		)
 	}
 	tmpDataPrefix, tmpDataNode := tmpData[0], tmpData[1]
 	tmpPrefix, prefixSize, err := decodePrefixFromString(tmpDataPrefix)

@@ -408,7 +408,10 @@ func (i *Indexer) handleEventOutputDns(
 		}
 		// Validate and convert all records before publishing any of them. A
 		// malformed, unsupported, or out-of-zone record invalidates the datum.
-		tmpRecords, err := validateAndConvertRecords(domainName, dnsDomain.Records)
+		tmpRecords, err := validateAndConvertRecords(
+			domainName,
+			dnsDomain.Records,
+		)
 		if err != nil {
 			slog.Warn(
 				"ignoring invalid DNS datum",
@@ -445,10 +448,14 @@ func validateAndConvertRecords(
 			return nil, errors.New("indexed record has an empty owner name")
 		}
 		if strings.ContainsAny(recordName, "\r\n") {
-			return nil, errors.New("indexed record owner name contains a line break")
+			return nil, errors.New(
+				"indexed record owner name contains a line break",
+			)
 		}
 		if containsUnquotedComment(recordName) {
-			return nil, errors.New("indexed record owner name contains a zone-file comment")
+			return nil, errors.New(
+				"indexed record owner name contains a zone-file comment",
+			)
 		}
 		if _, ok := dns.IsDomainName(recordName); !ok {
 			return nil, fmt.Errorf("invalid indexed record name %q", record.Lhs)
@@ -462,13 +469,18 @@ func validateAndConvertRecords(
 		}
 		recordType := strings.ToUpper(strings.TrimSpace(string(record.Type)))
 		if _, ok := supportedIndexedRecordTypes[recordType]; !ok {
-			return nil, fmt.Errorf("unsupported indexed record type %q", record.Type)
+			return nil, fmt.Errorf(
+				"unsupported indexed record type %q",
+				record.Type,
+			)
 		}
 		if strings.ContainsAny(string(record.Rhs), "\r\n") {
 			return nil, errors.New("indexed record data contains a line break")
 		}
 		if containsUnquotedComment(string(record.Rhs)) {
-			return nil, errors.New("indexed record data contains a zone-file comment")
+			return nil, errors.New(
+				"indexed record data contains a zone-file comment",
+			)
 		}
 		ttl := int64(0)
 		if record.Ttl.HasValue() {
@@ -485,12 +497,24 @@ func validateAndConvertRecords(
 			string(record.Rhs),
 		))
 		if err != nil {
-			return nil, fmt.Errorf("invalid %s record %q: %w", recordType, recordName, err)
+			return nil, fmt.Errorf(
+				"invalid %s record %q: %w",
+				recordType,
+				recordName,
+				err,
+			)
 		}
 		if rr == nil {
-			return nil, fmt.Errorf("invalid %s record %q: parser returned no record", recordType, recordName)
+			return nil, fmt.Errorf(
+				"invalid %s record %q: parser returned no record",
+				recordType,
+				recordName,
+			)
 		}
-		if !strings.EqualFold(dns.CanonicalName(rr.Header().Name), recordName) ||
+		if !strings.EqualFold(
+			dns.CanonicalName(rr.Header().Name),
+			recordName,
+		) ||
 			rr.Header().Rrtype != dns.StringToType[recordType] {
 			return nil, fmt.Errorf(
 				"invalid %s record %q: parsed owner or type does not match",
@@ -499,7 +523,12 @@ func validateAndConvertRecords(
 			)
 		}
 		if err := validateEncodedDNSSECFields(rr); err != nil {
-			return nil, fmt.Errorf("invalid %s record %q: %w", recordType, recordName, err)
+			return nil, fmt.Errorf(
+				"invalid %s record %q: %w",
+				recordType,
+				recordName,
+				err,
+			)
 		}
 		ret = append(ret, state.DomainRecord{
 			Lhs:  recordName,

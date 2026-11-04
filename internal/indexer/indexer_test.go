@@ -29,7 +29,13 @@ func TestNameWithinZoneUsesDNSLabelBoundaries(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			if got := nameWithinZone(test.name, test.zone); got != test.want {
-				t.Fatalf("nameWithinZone(%q, %q) = %v, want %v", test.name, test.zone, got, test.want)
+				t.Fatalf(
+					"nameWithinZone(%q, %q) = %v, want %v",
+					test.name,
+					test.zone,
+					got,
+					test.want,
+				)
 			}
 		})
 	}
@@ -76,21 +82,32 @@ func TestValidateAndConvertRecordsRejectsUnsafeData(t *testing.T) {
 			),
 		},
 		{
-			name:   "malformed DNSKEY public key",
-			record: validRecord("DNSKEY", "alice.cardano.", "257 3 8 not-base64"),
+			name: "malformed DNSKEY public key",
+			record: validRecord(
+				"DNSKEY",
+				"alice.cardano.",
+				"257 3 8 not-base64",
+			),
 		},
 		{
 			name:   "malformed DS digest",
 			record: validRecord("DS", "alice.cardano.", "12345 8 2 not-hex"),
 		},
 		{
-			name:   "malformed NSEC3 salt",
-			record: validRecord("NSEC3", "alice.cardano.", "1 0 0 not-hex ABCD A"),
+			name: "malformed NSEC3 salt",
+			record: validRecord(
+				"NSEC3",
+				"alice.cardano.",
+				"1 0 0 not-hex ABCD A",
+			),
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := validateAndConvertRecords("alice.cardano.", []models.CardanoDnsDomainRecord{test.record})
+			_, err := validateAndConvertRecords(
+				"alice.cardano.",
+				[]models.CardanoDnsDomainRecord{test.record},
+			)
 			if err == nil {
 				t.Fatal("expected invalid record to be rejected")
 			}
@@ -107,7 +124,8 @@ func TestValidateAndConvertRecordsRejectsUnsafeData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("valid records rejected: %v", err)
 	}
-	if len(records) != 2 || records[0].Type != "A" || records[1].Type != "AAAA" {
+	if len(records) != 2 || records[0].Type != "A" ||
+		records[1].Type != "AAAA" {
 		t.Fatalf("unexpected converted records: %#v", records)
 	}
 
@@ -154,7 +172,11 @@ func TestValidateAndConvertRecordsRejectsUnsafeData(t *testing.T) {
 		t.Fatalf("maximum DNS wire TTL should be accepted: %v", err)
 	}
 	if converted[0].Ttl != math.MaxUint32 {
-		t.Fatalf("maximum DNS wire TTL = %d, want %d", converted[0].Ttl, math.MaxUint32)
+		t.Fatalf(
+			"maximum DNS wire TTL = %d, want %d",
+			converted[0].Ttl,
+			math.MaxUint32,
+		)
 	}
 	tooHighTTLRecord := validRecord("A", "alice.cardano.", "192.0.2.1")
 	tooHighTTLRecord.Ttl = models.NewCardanoDnsMaybe[models.CardanoDnsTtl](

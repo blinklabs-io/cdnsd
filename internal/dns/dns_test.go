@@ -1707,7 +1707,12 @@ func TestQueryMultipleNameserversTriesFreshAddressesBeforeRetry(t *testing.T) {
 	msg.SetQuestion("example.com.", dns.TypeA)
 	_, err := resolver.queryNameserverAddresses(
 		msg,
-		[]string{"192.0.2.1:53", "192.0.2.2:53", "192.0.2.3:53", "192.0.2.4:53"},
+		[]string{
+			"192.0.2.1:53",
+			"192.0.2.2:53",
+			"192.0.2.3:53",
+			"192.0.2.4:53",
+		},
 		false,
 		newResolutionContext(),
 	)

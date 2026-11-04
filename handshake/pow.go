@@ -88,12 +88,16 @@ func targetToCompact(target *big.Int) uint32 {
 	if mantissaValue > uint64(^uint32(0)) || exponent > 0xff {
 		return 0
 	}
-	mantissa := uint32(mantissaValue) // #nosec G115 -- explicitly bounded above.
+	mantissa := uint32(
+		mantissaValue,
+	) // #nosec G115 -- explicitly bounded above.
 	if mantissa&0x00800000 != 0 {
 		mantissa >>= 8
 		exponent++
 	}
-	return uint32(exponent)<<24 | (mantissa & 0x007fffff) // #nosec G115 -- exponent is bounded above.
+	return uint32(
+		exponent,
+	)<<24 | (mantissa & 0x007fffff) // #nosec G115 -- exponent is bounded above.
 }
 
 // ValidatePoW checks that the block hash satisfies the proof-of-work target

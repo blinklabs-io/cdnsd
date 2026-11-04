@@ -118,7 +118,11 @@ func TestLoadReturnsAlreadyLoadedForLoadedState(t *testing.T) {
 		t.Fatalf("failed to get cursor after second load: %v", err)
 	}
 	if slot != 11 || hash != "block-hash" {
-		t.Fatalf("unexpected cursor after second load: slot=%d hash=%q", slot, hash)
+		t.Fatalf(
+			"unexpected cursor after second load: slot=%d hash=%q",
+			slot,
+			hash,
+		)
 	}
 }
 
@@ -133,18 +137,30 @@ func TestDNSSECRevisionChangesForBothNamespaces(t *testing.T) {
 	}
 	_, revision, err = s.DNSSECRevision(false)
 	if err != nil || revision != 1 {
-		t.Fatalf("Cardano revision after update = %d, %v; want one", revision, err)
+		t.Fatalf(
+			"Cardano revision after update = %d, %v; want one",
+			revision,
+			err,
+		)
 	}
 	_, handshakeRevision, err := s.DNSSECRevision(true)
 	if err != nil || handshakeRevision != 0 {
-		t.Fatalf("initial Handshake revision = %d, %v; want zero", handshakeRevision, err)
+		t.Fatalf(
+			"initial Handshake revision = %d, %v; want zero",
+			handshakeRevision,
+			err,
+		)
 	}
 	if err := s.UpdateHandshakeDomain("example", nil); err != nil {
 		t.Fatalf("UpdateHandshakeDomain() error = %v", err)
 	}
 	_, handshakeRevision, err = s.DNSSECRevision(true)
 	if err != nil || handshakeRevision != 1 {
-		t.Fatalf("Handshake revision after update = %d, %v; want one", handshakeRevision, err)
+		t.Fatalf(
+			"Handshake revision after update = %d, %v; want one",
+			handshakeRevision,
+			err,
+		)
 	}
 }
 
@@ -168,10 +184,17 @@ func TestDNSSECRevisionInstanceChangesAcrossReload(t *testing.T) {
 		t.Fatalf("DNSSECRevision() after reload error = %v", err)
 	}
 	if instanceBefore == instanceAfter {
-		t.Fatalf("state instance ID did not change across reload: %d", instanceBefore)
+		t.Fatalf(
+			"state instance ID did not change across reload: %d",
+			instanceBefore,
+		)
 	}
 	if revisionBefore != revisionAfter {
-		t.Fatalf("revision changed across reload: before=%d after=%d", revisionBefore, revisionAfter)
+		t.Fatalf(
+			"revision changed across reload: before=%d after=%d",
+			revisionBefore,
+			revisionAfter,
+		)
 	}
 }
 
@@ -231,7 +254,11 @@ func TestAddDiscoveredAddressDedupeAddressPolicyTLD(t *testing.T) {
 	}
 	expected := []DiscoveredAddress{addr, sameAddressDifferentTLD}
 	if !reflect.DeepEqual(got, expected) {
-		t.Fatalf("unexpected discovered addresses: got %#v expected %#v", got, expected)
+		t.Fatalf(
+			"unexpected discovered addresses: got %#v expected %#v",
+			got,
+			expected,
+		)
 	}
 
 	newAddr := DiscoveredAddress{
@@ -253,7 +280,11 @@ func TestAddDiscoveredAddressDedupeAddressPolicyTLD(t *testing.T) {
 	}
 	expected = []DiscoveredAddress{addr, sameAddressDifferentTLD, newAddr}
 	if !reflect.DeepEqual(got, expected) {
-		t.Fatalf("unexpected deduped addresses: got %#v expected %#v", got, expected)
+		t.Fatalf(
+			"unexpected deduped addresses: got %#v expected %#v",
+			got,
+			expected,
+		)
 	}
 }
 
@@ -412,7 +443,10 @@ func TestLoadClearsDerivedStateWhenProfileChanges(t *testing.T) {
 		t.Fatalf("stale handshake cursor survived profile change: %q", got)
 	}
 	oldNameHash := sha3.Sum256([]byte("old-handshake-name"))
-	if _, err := second.GetHandshakeNameByHash(oldNameHash[:]); !errors.Is(err, badger.ErrKeyNotFound) {
+	if _, err := second.GetHandshakeNameByHash(oldNameHash[:]); !errors.Is(
+		err,
+		badger.ErrKeyNotFound,
+	) {
 		t.Fatalf("stale handshake name survived profile change: %v", err)
 	}
 	if got, err := second.GetDNSSECRootAnchorState(); err != nil {
