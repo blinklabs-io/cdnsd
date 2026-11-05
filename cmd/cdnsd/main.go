@@ -57,7 +57,10 @@ func (s *runtimeStatus) healthHandler(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write([]byte("ok\n"))
 }
 
-func (s *runtimeStatus) readinessHandler(w http.ResponseWriter, _ *http.Request) {
+func (s *runtimeStatus) readinessHandler(
+	w http.ResponseWriter,
+	_ *http.Request,
+) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	if !s.ready.Load() {
 		http.Error(w, "not ready\n", http.StatusServiceUnavailable)

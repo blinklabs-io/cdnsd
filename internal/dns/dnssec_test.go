@@ -302,7 +302,11 @@ func TestPrepareDNSSECValidationBoundsAndReusesDNSKEYFetches(t *testing.T) {
 		t.Fatal("prepareDNSSECValidation() did not initialize DNSSEC keys")
 	}
 	if got := fetches.Load(); got == 0 || got > maxConcurrentNameserverQueries {
-		t.Fatalf("DNSKEY fetch count = %d, want 1..%d", got, maxConcurrentNameserverQueries)
+		t.Fatalf(
+			"DNSKEY fetch count = %d, want 1..%d",
+			got,
+			maxConcurrentNameserverQueries,
+		)
 	}
 
 	beforeReuse := fetches.Load()
@@ -320,7 +324,10 @@ func TestPrepareDNSSECValidationBoundsAndReusesDNSKEYFetches(t *testing.T) {
 		t.Fatal("initialized DNSSEC validation state was not reused")
 	}
 	if got := fetches.Load(); got != beforeReuse {
-		t.Fatalf("reused validation performed %d extra DNSKEY fetches", got-beforeReuse)
+		t.Fatalf(
+			"reused validation performed %d extra DNSKEY fetches",
+			got-beforeReuse,
+		)
 	}
 }
 
@@ -1055,32 +1062,35 @@ func loadIsolatedTestState(t testing.TB) {
 
 func BenchmarkLocalDNSSECProofLookupDoesNotRescanCachedZone(b *testing.B) {
 	for _, unrelatedRecords := range []int{1, 1024} {
-		b.Run(fmt.Sprintf("unrelated-%d", unrelatedRecords), func(b *testing.B) {
-			loadIsolatedTestState(b)
-			zone := fmt.Sprintf("bench-%d.", unrelatedRecords)
-			records := make([]state.DomainRecord, 0, unrelatedRecords)
-			for idx := range unrelatedRecords {
-				records = append(records, state.DomainRecord{
-					Lhs:  fmt.Sprintf("n%d.%s", idx, zone),
-					Type: "NSEC",
-					Rhs:  fmt.Sprintf("z.%s NSEC", zone),
-				})
-			}
-			if err := state.GetState().UpdateDomain(zone, records); err != nil {
-				b.Fatalf("UpdateDomain() error = %v", err)
-			}
-			if _, err := lookupCachedLocalZoneDNSSECRecords(zone, false); err != nil {
-				b.Fatalf("warm cache lookup error = %v", err)
-			}
-
-			b.ReportAllocs()
-			b.ResetTimer()
-			for range b.N {
-				if _, err := lookupCachedLocalZoneDNSSECRecords(zone, false); err != nil {
-					b.Fatal(err)
+		b.Run(
+			fmt.Sprintf("unrelated-%d", unrelatedRecords),
+			func(b *testing.B) {
+				loadIsolatedTestState(b)
+				zone := fmt.Sprintf("bench-%d.", unrelatedRecords)
+				records := make([]state.DomainRecord, 0, unrelatedRecords)
+				for idx := range unrelatedRecords {
+					records = append(records, state.DomainRecord{
+						Lhs:  fmt.Sprintf("n%d.%s", idx, zone),
+						Type: "NSEC",
+						Rhs:  fmt.Sprintf("z.%s NSEC", zone),
+					})
 				}
-			}
-		})
+				if err := state.GetState().UpdateDomain(zone, records); err != nil {
+					b.Fatalf("UpdateDomain() error = %v", err)
+				}
+				if _, err := lookupCachedLocalZoneDNSSECRecords(zone, false); err != nil {
+					b.Fatalf("warm cache lookup error = %v", err)
+				}
+
+				b.ReportAllocs()
+				b.ResetTimer()
+				for range b.N {
+					if _, err := lookupCachedLocalZoneDNSSECRecords(zone, false); err != nil {
+						b.Fatal(err)
+					}
+				}
+			},
+		)
 	}
 }
 
@@ -1285,7 +1295,11 @@ func TestLocalDNSSECProofCacheInvalidatesAndIsConcurrent(t *testing.T) {
 	}
 	records, err := lookupLocalZoneDNSSECRecords(zone, false)
 	if err != nil || len(records) != 1 {
-		t.Fatalf("initial cached lookup = %v, %v; want one record", records, err)
+		t.Fatalf(
+			"initial cached lookup = %v, %v; want one record",
+			records,
+			err,
+		)
 	}
 
 	const queryCount = 16
@@ -1315,7 +1329,11 @@ func TestLocalDNSSECProofCacheInvalidatesAndIsConcurrent(t *testing.T) {
 	}
 	records, err = lookupLocalZoneDNSSECRecords(zone, false)
 	if err != nil || len(records) != 0 {
-		t.Fatalf("lookup after removal = %v, %v; want empty result", records, err)
+		t.Fatalf(
+			"lookup after removal = %v, %v; want empty result",
+			records,
+			err,
+		)
 	}
 }
 

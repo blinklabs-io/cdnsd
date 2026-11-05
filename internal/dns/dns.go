@@ -102,8 +102,11 @@ func newResolutionContext() *resolutionContext {
 	return newResolutionContextWithContext(context.Background())
 }
 
+//
 //nolint:contextcheck // The context is stored for downstream DNS exchanges.
-func newResolutionContextWithContext(requestCtx context.Context) *resolutionContext {
+func newResolutionContextWithContext(
+	requestCtx context.Context,
+) *resolutionContext {
 	if requestCtx == nil {
 		requestCtx = context.Background()
 	}
@@ -140,12 +143,18 @@ func parseRecursionAllowlist(entries []string) ([]*net.IPNet, error) {
 		}
 		_, network, err := net.ParseCIDR(entry)
 		if err != nil {
-			return nil, fmt.Errorf("invalid DNS recursion allowlist entry %q: %w", entry, err)
+			return nil, fmt.Errorf(
+				"invalid DNS recursion allowlist entry %q: %w",
+				entry,
+				err,
+			)
 		}
 		networks = append(networks, network)
 	}
 	if len(networks) == 0 {
-		return nil, errors.New("DNS recursion allowlist contains no usable entries")
+		return nil, errors.New(
+			"DNS recursion allowlist contains no usable entries",
+		)
 	}
 	return networks, nil
 }
@@ -182,7 +191,10 @@ func requestContext(ctx *resolutionContext) context.Context {
 	return ctx.requestCtx
 }
 
-func configuredDuration(milliseconds int, fallback, maximum time.Duration) time.Duration {
+func configuredDuration(
+	milliseconds int,
+	fallback, maximum time.Duration,
+) time.Duration {
 	if milliseconds <= 0 {
 		return fallback
 	}
@@ -334,9 +346,16 @@ func (r *Resolver) resolveNameserverAddress(
 		return ips, nil
 	}
 	if lastErr != nil {
-		return nil, fmt.Errorf("upstream resolution failed for %s: %w", nsName, lastErr)
+		return nil, fmt.Errorf(
+			"upstream resolution failed for %s: %w",
+			nsName,
+			lastErr,
+		)
 	}
-	return nil, fmt.Errorf("no A/AAAA records in upstream response for %s", nsName)
+	return nil, fmt.Errorf(
+		"no A/AAAA records in upstream response for %s",
+		nsName,
+	)
 }
 
 // Server owns the DNS listeners started by Start.
@@ -368,7 +387,8 @@ func (s *Server) Shutdown(ctx context.Context) error {
 			s.stopRootAnchors()
 		}
 		for _, server := range s.servers {
-			if err := server.ShutdownContext(ctx); err != nil && !isServerNotStarted(err) {
+			if err := server.ShutdownContext(ctx); err != nil &&
+				!isServerNotStarted(err) {
 				errs = append(errs, err)
 			}
 		}
@@ -403,14 +423,20 @@ func (r *Resolver) rootServers() []string {
 	for _, rrs := range r.rootHints[dns.TypeA] {
 		for _, rr := range rrs {
 			if address, ok := rr.(*dns.A); ok {
-				ipv4Servers = append(ipv4Servers, net.JoinHostPort(address.A.String(), "53"))
+				ipv4Servers = append(
+					ipv4Servers,
+					net.JoinHostPort(address.A.String(), "53"),
+				)
 			}
 		}
 	}
 	for _, rrs := range r.rootHints[dns.TypeAAAA] {
 		for _, rr := range rrs {
 			if address, ok := rr.(*dns.AAAA); ok {
-				ipv6Servers = append(ipv6Servers, net.JoinHostPort(address.AAAA.String(), "53"))
+				ipv6Servers = append(
+					ipv6Servers,
+					net.JoinHostPort(address.AAAA.String(), "53"),
+				)
 			}
 		}
 	}
@@ -874,7 +900,11 @@ func (r *Resolver) handleQuery(w dns.ResponseWriter, req *dns.Msg) {
 		var cancel context.CancelFunc
 		requestCtx, cancel = context.WithTimeout(
 			context.Background(),
-			configuredDuration(cfg.Dns.RecursionTimeoutMs, 10*time.Second, 2*time.Minute),
+			configuredDuration(
+				cfg.Dns.RecursionTimeoutMs,
+				10*time.Second,
+				2*time.Minute,
+			),
 		)
 		defer cancel()
 	}
@@ -1071,7 +1101,11 @@ func (r *Resolver) handleQuery(w dns.ResponseWriter, req *dns.Msg) {
 	}
 }
 
-func writeFormatError(w dns.ResponseWriter, r *dns.Msg, recursionAvailable bool) {
+func writeFormatError(
+	w dns.ResponseWriter,
+	r *dns.Msg,
+	recursionAvailable bool,
+) {
 	if w == nil || r == nil {
 		return
 	}
@@ -1651,7 +1685,10 @@ func (r *Resolver) queryNameserverAddresses(
 		if resp == nil {
 			errs = append(
 				errs,
-				fmt.Errorf("nameserver %s returned a nil response", result.address),
+				fmt.Errorf(
+					"nameserver %s returned a nil response",
+					result.address,
+				),
 			)
 			continue
 		}
@@ -1818,7 +1855,10 @@ func acquireNameserverQuerySlot(
 	}
 }
 
-func exchangeTimeout(ctx context.Context, maximum time.Duration) (time.Duration, error) {
+func exchangeTimeout(
+	ctx context.Context,
+	maximum time.Duration,
+) (time.Duration, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}

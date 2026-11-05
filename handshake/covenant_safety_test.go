@@ -19,7 +19,10 @@ func TestCheckedCovenantRejectsMalformedInput(t *testing.T) {
 	}
 	for _, covenant := range testCases {
 		if _, err := covenant.CheckedCovenant(); err == nil {
-			t.Fatalf("CheckedCovenant accepted malformed covenant %#v", covenant)
+			t.Fatalf(
+				"CheckedCovenant accepted malformed covenant %#v",
+				covenant,
+			)
 		}
 	}
 }

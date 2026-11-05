@@ -501,14 +501,22 @@ func normalizeDomainRecords(
 ) (string, []DomainRecord, error) {
 	normalizedDomainName, err := normalizeStateName(domainName)
 	if err != nil {
-		return "", nil, fmt.Errorf("invalid domain name %q: %w", domainName, err)
+		return "", nil, fmt.Errorf(
+			"invalid domain name %q: %w",
+			domainName,
+			err,
+		)
 	}
 	domainName = normalizedDomainName
 	ret := make([]DomainRecord, 0, len(records))
 	for _, record := range records {
 		recordName, err := normalizeStateName(record.Lhs)
 		if err != nil {
-			return "", nil, fmt.Errorf("invalid record name %q: %w", record.Lhs, err)
+			return "", nil, fmt.Errorf(
+				"invalid record name %q: %w",
+				record.Lhs,
+				err,
+			)
 		}
 		if !stateNameWithinZone(recordName, domainName) {
 			return "", nil, fmt.Errorf(
@@ -523,7 +531,10 @@ func normalizeDomainRecords(
 			return "", nil, fmt.Errorf("invalid record type %q", record.Type)
 		}
 		if record.Ttl < 0 {
-			return "", nil, fmt.Errorf("invalid negative TTL for record %q", recordName)
+			return "", nil, fmt.Errorf(
+				"invalid negative TTL for record %q",
+				recordName,
+			)
 		}
 		ret = append(ret, record)
 	}
@@ -533,7 +544,8 @@ func normalizeDomainRecords(
 func normalizeStateName(name string) (string, error) {
 	name = strings.TrimSpace(name)
 	name = strings.TrimSuffix(name, ".")
-	if name == "" || strings.HasPrefix(name, ".") || strings.Contains(name, "..") {
+	if name == "" || strings.HasPrefix(name, ".") ||
+		strings.Contains(name, "..") {
 		return "", errors.New("name is empty or has an empty label")
 	}
 	if len(name) > 253 {
@@ -803,7 +815,9 @@ func (s *State) lookupRecords(
 					if err := gobDec.Decode(&tmpRecord); err != nil {
 						return err
 					}
-					if strings.ToLower(strings.Trim(tmpRecord.Lhs, ".")) != recordName {
+					if strings.ToLower(
+						strings.Trim(tmpRecord.Lhs, "."),
+					) != recordName {
 						continue
 					}
 					ret = append(ret, tmpRecord)

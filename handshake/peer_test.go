@@ -228,14 +228,22 @@ func expectGetHeaders(t *testing.T, conn net.Conn, locator [][32]byte) {
 		t.Fatalf("read GetHeaders: %v", err)
 	}
 	if msgType != MessageGetHeaders {
-		t.Fatalf("frame type = %d, want MessageGetHeaders (%d)", msgType, MessageGetHeaders)
+		t.Fatalf(
+			"frame type = %d, want MessageGetHeaders (%d)",
+			msgType,
+			MessageGetHeaders,
+		)
 	}
 	getHeaders, ok := msg.(*MsgGetHeaders)
 	if !ok {
 		t.Fatalf("frame decoded to %T, want *MsgGetHeaders", msg)
 	}
 	if len(getHeaders.Locator) != len(locator) {
-		t.Fatalf("GetHeaders locator length = %d, want %d", len(getHeaders.Locator), len(locator))
+		t.Fatalf(
+			"GetHeaders locator length = %d, want %d",
+			len(getHeaders.Locator),
+			len(locator),
+		)
 	}
 	for idx := range locator {
 		if getHeaders.Locator[idx] != locator[idx] {
@@ -262,7 +270,11 @@ func expectSendHeadersThenGetHeaders(
 		t.Fatalf("read SendHeaders: %v", err)
 	}
 	if msgType != MessageSendHeaders {
-		t.Fatalf("frame type = %d, want MessageSendHeaders (%d)", msgType, MessageSendHeaders)
+		t.Fatalf(
+			"frame type = %d, want MessageSendHeaders (%d)",
+			msgType,
+			MessageSendHeaders,
+		)
 	}
 	expectGetHeaders(t, conn, locator)
 }
@@ -351,7 +363,9 @@ func TestSyncStopsWhenHeaderBatchTargetExceedsNetworkPowLimit(t *testing.T) {
 			t.Fatalf("Sync error = %v, want a network PoW limit error", err)
 		}
 	case <-time.After(15 * time.Second):
-		t.Fatal("Sync did not reject a header batch above the network PoW limit")
+		t.Fatal(
+			"Sync did not reject a header batch above the network PoW limit",
+		)
 	}
 	select {
 	case <-peer.DoneChan():

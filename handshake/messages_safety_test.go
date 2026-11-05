@@ -18,7 +18,10 @@ func TestMsgVersionDecodeRejectsMalformedInput(t *testing.T) {
 	} {
 		msg := new(MsgVersion)
 		if err := msg.Decode(data); err == nil {
-			t.Errorf("MsgVersion.Decode accepted malformed payload of length %d", len(data))
+			t.Errorf(
+				"MsgVersion.Decode accepted malformed payload of length %d",
+				len(data),
+			)
 		}
 	}
 }
@@ -27,6 +30,8 @@ func TestMsgHeadersDecodeRejectsOversizedBatch(t *testing.T) {
 	data := WriteUvarint(maxBlockHeaders + 1)
 	msg := new(MsgHeaders)
 	if err := msg.Decode(data); err == nil {
-		t.Fatal("MsgHeaders.Decode accepted more than the protocol header batch limit")
+		t.Fatal(
+			"MsgHeaders.Decode accepted more than the protocol header batch limit",
+		)
 	}
 }

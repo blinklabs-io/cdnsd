@@ -18,7 +18,9 @@ import (
 	"time"
 )
 
-var errHeaderChainDoesNotExtend = errors.New("header batch does not extend current locator")
+var errHeaderChainDoesNotExtend = errors.New(
+	"header batch does not extend current locator",
+)
 
 const (
 	dialTimeout        = 5 * time.Second
@@ -573,7 +575,10 @@ func (p *Peer) Sync(locator [][32]byte, syncFunc SyncFunc) error {
 							)
 						}
 						if err := blk.ValidatePoW(); err != nil {
-							return fmt.Errorf("fetched block PoW validation failed: %w", err)
+							return fmt.Errorf(
+								"fetched block PoW validation failed: %w",
+								err,
+							)
 						}
 						// Call user callback with block
 						if err := syncFunc(blk); err != nil {
