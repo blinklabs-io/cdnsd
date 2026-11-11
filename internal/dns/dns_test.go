@@ -1678,6 +1678,8 @@ func TestQueryMultipleNameserversNoAddresses(t *testing.T) {
 func TestQueryMultipleNameserversTriesFreshAddressesBeforeRetry(t *testing.T) {
 	var mu sync.Mutex
 	var attempted []string
+	seen := make(map[string]struct{})
+	allSeen := make(chan struct{})
 	resolver := &Resolver{
 		exchangeFn: func(
 			_ context.Context,
@@ -1686,7 +1688,27 @@ func TestQueryMultipleNameserversTriesFreshAddressesBeforeRetry(t *testing.T) {
 			_ time.Duration,
 		) (*dns.Msg, error) {
 			mu.Lock()
+			_, repeat := seen[address]
+			mu.Unlock()
+			if repeat {
+				// Workers dequeue jobs in order but reach this function in
+				// scheduling order. Hold a retry until every address has
+				// been tried, so the recorded order reflects the queue
+				// order. A resolver that retries before trying a fresh
+				// address never releases it and runs out the timeout.
+				select {
+				case <-allSeen:
+				case <-time.After(2 * time.Second):
+				}
+			}
+			mu.Lock()
 			attempted = append(attempted, address)
+			if _, ok := seen[address]; !ok {
+				seen[address] = struct{}{}
+				if len(seen) == 4 {
+					close(allSeen)
+				}
+			}
 			mu.Unlock()
 			response := new(dns.Msg)
 			response.Rcode = dns.RcodeServerFailure
