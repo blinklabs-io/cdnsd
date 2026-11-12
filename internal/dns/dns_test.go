@@ -1676,8 +1676,18 @@ func TestQueryMultipleNameserversNoAddresses(t *testing.T) {
 }
 
 func TestQueryMultipleNameserversTriesFreshAddressesBeforeRetry(t *testing.T) {
+	// One address per worker. Every worker holds exactly one dequeued job
+	// when the barrier opens, so the addresses recorded before it opens are
+	// the head of the job queue regardless of goroutine scheduling. Fresh
+	// addresses precede retries only if that head has no repeats.
+	workers := maxConcurrentNameserverQueries
+	addresses := make([]string, workers)
+	for i := range addresses {
+		addresses[i] = fmt.Sprintf("192.0.2.%d:53", i+1)
+	}
 	var mu sync.Mutex
-	var attempted []string
+	var head []string
+	barrier := make(chan struct{})
 	resolver := &Resolver{
 		exchangeFn: func(
 			_ context.Context,
@@ -1686,8 +1696,17 @@ func TestQueryMultipleNameserversTriesFreshAddressesBeforeRetry(t *testing.T) {
 			_ time.Duration,
 		) (*dns.Msg, error) {
 			mu.Lock()
-			attempted = append(attempted, address)
+			if len(head) < workers {
+				head = append(head, address)
+				if len(head) == workers {
+					close(barrier)
+				}
+			}
 			mu.Unlock()
+			select {
+			case <-barrier:
+			case <-time.After(5 * time.Second):
+			}
 			response := new(dns.Msg)
 			response.Rcode = dns.RcodeServerFailure
 			return response, nil
@@ -1707,12 +1726,7 @@ func TestQueryMultipleNameserversTriesFreshAddressesBeforeRetry(t *testing.T) {
 	msg.SetQuestion("example.com.", dns.TypeA)
 	_, err := resolver.queryNameserverAddresses(
 		msg,
-		[]string{
-			"192.0.2.1:53",
-			"192.0.2.2:53",
-			"192.0.2.3:53",
-			"192.0.2.4:53",
-		},
+		addresses,
 		false,
 		newResolutionContext(),
 	)
@@ -1721,15 +1735,15 @@ func TestQueryMultipleNameserversTriesFreshAddressesBeforeRetry(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(attempted) < 4 {
-		t.Fatalf("attempted %d addresses, want at least 4", len(attempted))
+	if len(head) != workers {
+		t.Fatalf("recorded %d initial queries, want %d", len(head), workers)
 	}
-	firstRound := make(map[string]struct{}, 4)
-	for _, address := range attempted[:4] {
-		firstRound[address] = struct{}{}
+	distinct := make(map[string]struct{}, workers)
+	for _, address := range head {
+		distinct[address] = struct{}{}
 	}
-	if len(firstRound) != 4 {
-		t.Errorf("retries preceded fresh addresses: %v", attempted[:4])
+	if len(distinct) != workers {
+		t.Errorf("retries preceded fresh addresses: %v", head)
 	}
 }
 
